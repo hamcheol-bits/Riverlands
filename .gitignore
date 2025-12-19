@@ -1,0 +1,19 @@
+# Environment
+.env
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+*.iml
+
+# Data directories (optional - 로컬 개발용 데이터는 제외)
+mysql/data/
+chroma/data/
+
+# Logs
+*.log
+# 프로젝트 제외 경로
+/.venv/
+venv
