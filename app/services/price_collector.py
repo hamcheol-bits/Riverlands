@@ -9,8 +9,7 @@ from sqlalchemy import func
 
 from app.services.kis_client import get_kis_client
 from app.models.stock import Stock
-from app.models.price import StockPrice
-from app.models.collection_history import CollectionHistory
+from app.models.stock_price import StockPrice
 
 logger = logging.getLogger(__name__)
 

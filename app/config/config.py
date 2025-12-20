@@ -47,6 +47,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = True
+        extra = "ignore"  # 정의되지 않은 환경변수 무시
 
     @property
     def database_url(self) -> str:

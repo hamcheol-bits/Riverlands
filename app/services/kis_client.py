@@ -6,7 +6,7 @@ import logging
 import asyncio
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
-from app.core.config import get_settings
+from app.config.config import get_settings
 from app.core.kis_auth import get_auth_manager
 
 logger = logging.getLogger(__name__)
