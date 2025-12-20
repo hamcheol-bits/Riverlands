@@ -2,6 +2,7 @@
 Riverlands FastAPI 메인 애플리케이션
 """
 from fastapi import FastAPI, Depends
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 import logging
 from contextlib import asynccontextmanager
@@ -69,8 +70,8 @@ async def root():
 async def health_check(db: Session = Depends(get_db)):
     """헬스 체크 엔드포인트"""
     try:
-        # DB 연결 확인
-        db.execute("SELECT 1")
+        # DB 연결 확인 - text() 함수 사용
+        db.execute(text("SELECT 1"))
         db_status = "healthy"
     except Exception as e:
         logger.error(f"Database health check failed: {e}")
@@ -84,17 +85,15 @@ async def health_check(db: Session = Depends(get_db)):
 
 
 @app.get("/api/token/verify")
-async def verify_token(db: Session = Depends(get_db)):
+async def verify_token():
     """KIS API 토큰 확인 엔드포인트"""
     try:
         auth_manager = get_auth_manager()
-        token = await auth_manager.get_access_token(db)
+        token = await auth_manager.get_access_token()
 
         return {
             "status": "ok",
-            "token_exists": bool(token),
-            "token_valid": auth_manager._is_token_valid(),
-            "expires_at": auth_manager._token_expires_at.isoformat() if auth_manager._token_expires_at else None
+            "token_exists": bool(token)
         }
     except Exception as e:
         logger.error(f"Token verification failed: {e}")

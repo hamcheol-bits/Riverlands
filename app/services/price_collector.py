@@ -1,11 +1,10 @@
 """
-주가 데이터 수집 서비스
+주가 데이터 수집 서비스 (KIS API 응답 필드명 사용)
 """
 import logging
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 from app.services.kis_client import get_kis_client
 from app.models.stock import Stock
@@ -15,223 +14,237 @@ logger = logging.getLogger(__name__)
 
 
 class PriceCollector:
-    """주가 데이터 수집기"""
+    """
+    주가 데이터 수집기
+
+    KIS API 응답 필드명을 그대로 사용하여 데이터베이스에 저장
+    """
 
     def __init__(self):
-        self.client = get_kis_client()
+        self.kis_client = get_kis_client()
 
     async def collect_daily_prices(
         self,
-        db: Session,
         ticker: str,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
-    ) -> dict:
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
-        종목의 일별 주가 데이터 수집
+        일별 주가 데이터 수집
+
+        KIS API: FHKST03010100 (국내주식기간별시세)
 
         Args:
-            db: 데이터베이스 세션
-            ticker: 종목코드
-            start_date: 시작일 (None이면 마지막 수집일 다음날부터)
-            end_date: 종료일 (None이면 오늘)
+            ticker: 종목코드 (6자리)
+            start_date: 시작일 (YYYYMMDD, 기본값: 100일 전)
+            end_date: 종료일 (YYYYMMDD, 기본값: 오늘)
 
         Returns:
-            수집 결과 딕셔너리
+            주가 데이터 리스트 (KIS API output 필드명 그대로 반환)
         """
-        # 종목 존재 확인
-        stock = db.query(Stock).filter(Stock.ticker == ticker).first()
-        if not stock:
-            raise ValueError(f"Stock not found: {ticker}")
+        if not start_date:
+            start_date = (datetime.now() - timedelta(days=100)).strftime("%Y%m%d")
+        if not end_date:
+            end_date = datetime.now().strftime("%Y%m%d")
 
-        # 날짜 범위 설정
-        if end_date is None:
-            end_date = datetime.now()
+        endpoint = "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
+        tr_id = "FHKST03010100"  # 국내주식기간별시세(일/주/월/년)
 
-        if start_date is None:
-            # 마지막 수집일 조회
-            last_price = db.query(func.max(StockPrice.trade_date)).filter(
-                StockPrice.ticker == ticker
-            ).scalar()
-
-            if last_price:
-                start_date = last_price + timedelta(days=1)
-            else:
-                # 최초 수집: 1년 전부터
-                start_date = end_date - timedelta(days=365)
-
-        # 이미 최신 데이터인 경우
-        if start_date > end_date:
-            logger.info(f"Already up to date for {ticker}")
-            return {
-                "ticker": ticker,
-                "status": "up_to_date",
-                "collected": 0
-            }
-
-        # 수집 시작 기록
-        collection = CollectionHistory(
-            collection_type="daily_price",
-            target_date=end_date.date(),
-            status="running",
-            started_at=datetime.now()
-        )
-        db.add(collection)
-        db.commit()
+        params = {
+            "FID_COND_MRKT_DIV_CODE": "J",  # 시장 분류 코드 (J:주식/ETF/ETN)
+            "FID_INPUT_ISCD": ticker,  # 종목코드
+            "FID_INPUT_DATE_1": start_date,  # 시작일자
+            "FID_INPUT_DATE_2": end_date,  # 종료일자
+            "FID_PERIOD_DIV_CODE": "D",  # 기간 분류 코드 (D:일, W:주, M:월, Y:년)
+            "FID_ORG_ADJ_PRC": "0"  # 수정주가 여부 (0:수정주가 반영 안함, 1:반영)
+        }
 
         try:
-            # KIS API 호출
-            start_date_str = self.client.format_date(start_date)
-            end_date_str = self.client.format_date(end_date)
+            response = await self.kis_client._request("GET", endpoint, tr_id, params)
 
-            logger.info(f"Collecting prices for {ticker} from {start_date_str} to {end_date_str}")
-            response = await self.client.get_daily_price(ticker, start_date_str, end_date_str)
+            # KIS API 응답 구조: { rt_cd, msg_cd, msg1, output1, output2 }
+            # output2: 일자별 주가 데이터 배열
+            if response.get("rt_cd") != "0":
+                logger.warning(f"API Error: {response.get('msg1')}")
+                return []
 
-            # 데이터 파싱 및 저장
-            prices = self._parse_price_data(ticker, response)
-            saved_count = self._save_prices(db, prices)
+            prices = response.get("output2", [])
+            logger.info(f"Collected {len(prices)} price records for {ticker}")
 
-            # 수집 완료 기록
-            collection.status = "success"
-            collection.total_count = len(prices)
-            collection.success_count = saved_count
-            collection.completed_at = datetime.now()
-            db.commit()
-
-            logger.info(f"Successfully collected {saved_count} price records for {ticker}")
-
-            return {
-                "ticker": ticker,
-                "status": "success",
-                "collected": saved_count,
-                "start_date": start_date_str,
-                "end_date": end_date_str
-            }
+            return prices  # KIS API 응답 필드명 그대로 반환
 
         except Exception as e:
-            logger.error(f"Error collecting prices for {ticker}: {e}")
+            logger.error(f"Failed to collect prices for {ticker}: {e}")
+            return []
 
-            # 수집 실패 기록
-            collection.status = "failed"
-            collection.error_message = str(e)
-            collection.completed_at = datetime.now()
-            db.commit()
-
-            raise
-
-    def _parse_price_data(self, ticker: str, response: dict) -> List[dict]:
+    async def save_prices_to_db(
+        self,
+        db: Session,
+        ticker: str,
+        prices: List[Dict[str, Any]]
+    ) -> int:
         """
-        KIS API 응답 데이터 파싱
-
-        Args:
-            ticker: 종목코드
-            response: KIS API 응답
-
-        Returns:
-            파싱된 가격 데이터 리스트
-        """
-        prices = []
-        output = response.get("output2", [])
-
-        for item in output:
-            try:
-                price_data = {
-                    "ticker": ticker,
-                    "trade_date": datetime.strptime(item["stck_bsop_date"], "%Y%m%d").date(),
-                    "open": float(item.get("stck_oprc", 0)),
-                    "high": float(item.get("stck_hgpr", 0)),
-                    "low": float(item.get("stck_lwpr", 0)),
-                    "close": float(item.get("stck_clpr", 0)),
-                    "volume": int(item.get("acml_vol", 0)),
-                    "trading_value": float(item.get("acml_tr_pbmn", 0)),
-                    "market_cap": None,  # KIS API에서 직접 제공하지 않음
-                    "change_rate": float(item.get("prdy_ctrt", 0))
-                }
-                prices.append(price_data)
-            except (ValueError, KeyError) as e:
-                logger.warning(f"Failed to parse price data: {e}, item: {item}")
-                continue
-
-        return prices
-
-    def _save_prices(self, db: Session, prices: List[dict]) -> int:
-        """
-        가격 데이터 저장 (중복 시 업데이트)
+        수집한 주가 데이터를 DB에 저장
 
         Args:
             db: 데이터베이스 세션
-            prices: 저장할 가격 데이터 리스트
+            ticker: 종목코드
+            prices: KIS API 응답 데이터 (output2)
 
         Returns:
             저장된 레코드 수
         """
+        if not prices:
+            return 0
+
         saved_count = 0
 
-        for price_data in prices:
+        for item in prices:
             try:
-                # 기존 레코드 확인
+                # KIS API 응답 필드명 그대로 사용
+                stock_price = StockPrice(
+                    ticker=ticker,
+                    stck_bsop_date=datetime.strptime(item["stck_bsop_date"], "%Y%m%d").date(),
+                    stck_oprc=float(item["stck_oprc"]) if item.get("stck_oprc") else None,
+                    stck_hgpr=float(item["stck_hgpr"]) if item.get("stck_hgpr") else None,
+                    stck_lwpr=float(item["stck_lwpr"]) if item.get("stck_lwpr") else None,
+                    stck_clpr=float(item["stck_clpr"]),
+                    acml_vol=int(item["acml_vol"]) if item.get("acml_vol") else None,
+                    acml_tr_pbmn=int(item.get("acml_tr_pbmn", 0)) if item.get("acml_tr_pbmn") else None,
+                    prdy_vrss=float(item.get("prdy_vrss", 0)) if item.get("prdy_vrss") else None,
+                    prdy_vrss_sign=item.get("prdy_vrss_sign"),
+                    prdy_ctrt=float(item.get("prdy_ctrt", 0)) if item.get("prdy_ctrt") else None,
+                    hts_frgn_ehrt=float(item.get("hts_frgn_ehrt", 0)) if item.get("hts_frgn_ehrt") else None,
+                    frgn_ntby_qty=int(item.get("frgn_ntby_qty", 0)) if item.get("frgn_ntby_qty") else None
+                )
+
+                # Upsert: 기존 데이터가 있으면 업데이트, 없으면 삽입
                 existing = db.query(StockPrice).filter(
-                    StockPrice.ticker == price_data["ticker"],
-                    StockPrice.trade_date == price_data["trade_date"]
+                    StockPrice.ticker == ticker,
+                    StockPrice.stck_bsop_date == stock_price.stck_bsop_date
                 ).first()
 
                 if existing:
                     # 업데이트
-                    for key, value in price_data.items():
-                        setattr(existing, key, value)
+                    existing.stck_oprc = stock_price.stck_oprc
+                    existing.stck_hgpr = stock_price.stck_hgpr
+                    existing.stck_lwpr = stock_price.stck_lwpr
+                    existing.stck_clpr = stock_price.stck_clpr
+                    existing.acml_vol = stock_price.acml_vol
+                    existing.acml_tr_pbmn = stock_price.acml_tr_pbmn
+                    existing.prdy_vrss = stock_price.prdy_vrss
+                    existing.prdy_vrss_sign = stock_price.prdy_vrss_sign
+                    existing.prdy_ctrt = stock_price.prdy_ctrt
+                    existing.hts_frgn_ehrt = stock_price.hts_frgn_ehrt
+                    existing.frgn_ntby_qty = stock_price.frgn_ntby_qty
                 else:
-                    # 신규 생성
-                    price = StockPrice(**price_data)
-                    db.add(price)
+                    # 삽입
+                    db.add(stock_price)
 
                 saved_count += 1
 
             except Exception as e:
-                logger.error(f"Error saving price data: {e}")
+                logger.error(f"Failed to save price data for {ticker} on {item.get('stck_bsop_date')}: {e}")
                 continue
 
+        # 커밋
         db.commit()
+        logger.info(f"Saved {saved_count} price records for {ticker}")
+
         return saved_count
 
-    async def collect_all_active_stocks(
+    async def collect_and_save(
         self,
         db: Session,
-        batch_size: int = 10
-    ) -> dict:
+        ticker: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
-        모든 활성 종목의 주가 데이터 수집
+        주가 데이터 수집 및 저장 (통합)
 
         Args:
             db: 데이터베이스 세션
-            batch_size: 배치 크기
+            ticker: 종목코드
+            start_date: 시작일 (YYYYMMDD)
+            end_date: 종료일 (YYYYMMDD)
 
         Returns:
-            수집 통계
+            수집 결과
         """
-        # 활성 종목 조회
-        active_stocks = db.query(Stock).filter(Stock.is_active == True).all()
+        # 종목 존재 확인
+        stock = db.query(Stock).filter(Stock.ticker == ticker).first()
+        if not stock:
+            return {
+                "ticker": ticker,
+                "status": "error",
+                "message": f"Stock {ticker} not found in database",
+                "collected": 0
+            }
 
-        logger.info(f"Starting price collection for {len(active_stocks)} active stocks")
+        # 데이터 수집
+        prices = await self.collect_daily_prices(ticker, start_date, end_date)
 
-        total_collected = 0
-        failed_tickers = []
+        if not prices:
+            return {
+                "ticker": ticker,
+                "status": "no_data",
+                "message": "No price data returned from API",
+                "collected": 0
+            }
 
-        for i, stock in enumerate(active_stocks):
-            try:
-                result = await self.collect_daily_prices(db, stock.ticker)
-                total_collected += result.get("collected", 0)
-
-                # 배치 단위로 진행 상황 로그
-                if (i + 1) % batch_size == 0:
-                    logger.info(f"Progress: {i + 1}/{len(active_stocks)} stocks processed")
-
-            except Exception as e:
-                logger.error(f"Failed to collect prices for {stock.ticker}: {e}")
-                failed_tickers.append(stock.ticker)
+        # 데이터 저장
+        saved_count = await self.save_prices_to_db(db, ticker, prices)
 
         return {
-            "total_stocks": len(active_stocks),
-            "total_collected": total_collected,
-            "failed_count": len(failed_tickers),
-            "failed_tickers": failed_tickers
+            "ticker": ticker,
+            "status": "success",
+            "collected": len(prices),
+            "saved": saved_count
         }
+
+    async def collect_incremental(
+        self,
+        db: Session,
+        ticker: str
+    ) -> Dict[str, Any]:
+        """
+        증분 수집 (마지막 수집일 이후 데이터만)
+
+        Args:
+            db: 데이터베이스 세션
+            ticker: 종목코드
+
+        Returns:
+            수집 결과
+        """
+        # 마지막 수집일 조회
+        last_price = db.query(StockPrice).filter(
+            StockPrice.ticker == ticker
+        ).order_by(StockPrice.stck_bsop_date.desc()).first()
+
+        if last_price:
+            # 마지막 수집일 다음날부터
+            start_date = (last_price.stck_bsop_date + timedelta(days=1)).strftime("%Y%m%d")
+        else:
+            # 최초 수집: 1년 전부터
+            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+
+        end_date = datetime.now().strftime("%Y%m%d")
+
+        # 이미 최신인 경우
+        if start_date > end_date:
+            return {
+                "ticker": ticker,
+                "status": "up_to_date",
+                "message": "Already have latest data",
+                "collected": 0,
+                "saved": 0
+            }
+
+        return await self.collect_and_save(db, ticker, start_date, end_date)
+
+
+def get_price_collector() -> PriceCollector:
+    """PriceCollector 싱글톤 반환"""
+    return PriceCollector()

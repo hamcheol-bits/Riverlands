@@ -1,7 +1,7 @@
 """
 데이터베이스 연결 및 세션 관리
 """
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from typing import Generator
@@ -66,7 +66,7 @@ def check_db_connection() -> bool:
     """데이터베이스 연결 확인"""
     try:
         db = SessionLocal()
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))  # text() 함수로 래핑
         db.close()
         logger.info("Database connection successful")
         return True
