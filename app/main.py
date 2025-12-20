@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 import logging
 from contextlib import asynccontextmanager
 
-from app.core.config import get_settings
+from app.config.config import get_settings
 from app.core.database import get_db, check_db_connection, init_db
 from app.core.kis_auth import get_auth_manager
 

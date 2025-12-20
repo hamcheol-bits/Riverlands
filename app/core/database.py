@@ -52,7 +52,7 @@ def init_db():
     """데이터베이스 초기화 (테이블 생성)"""
     try:
         # 모든 모델을 import하여 Base.metadata에 등록
-        from app.models import stock, price, investor_trading, program_trading, financial, api_token
+        from app.models import stock, stock_price
 
         # 테이블 생성
         Base.metadata.create_all(bind=engine)

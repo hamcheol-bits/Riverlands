@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> str:
         """데이터베이스 연결 URL"""
-        return f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}?charset=utf8mb4"
+        return "mysql+pymysql://finuser:finuser@localhost:3306/financial_data?charset=utf8mb4"
 
     @property
     def redis_url(self) -> str:
