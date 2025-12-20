@@ -21,17 +21,13 @@ class Settings(BaseSettings):
     KIS_VIRTUAL_MODE: bool = False  # False: 실전투자, True: 모의투자
 
     # 데이터베이스 설정
-    DB_HOST: str = "localhost"
-    DB_PORT: int = 3306
-    DB_USER: str = "riverlands_user"
-    DB_PASSWORD: str
-    DB_NAME: str = "riverlands"
+    DATABASE_URL: str  # 전체 DB URL (환경변수에서 직접 사용)
 
     # Redis 설정 (토큰 캐시)
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
-    REDIS_PASSWORD: str = None  # Optional
+    REDIS_PASSWORD: str = ""  # Optional
     REDIS_TOKEN_KEY: str = "kis_access_token"  # Redis key for token
 
     # API 호출 제한 설정
@@ -54,8 +50,11 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
-        """데이터베이스 연결 URL"""
-        return "mysql+pymysql://finuser:finuser@localhost:3306/financial_data?charset=utf8mb4"
+        """
+        데이터베이스 연결 URL
+        환경변수 DATABASE_URL을 그대로 사용
+        """
+        return self.DATABASE_URL
 
     @property
     def redis_url(self) -> str:
