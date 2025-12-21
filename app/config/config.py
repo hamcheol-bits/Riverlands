@@ -72,7 +72,7 @@ class Settings(BaseSettings):
     @property
     def kis_api_url(self) -> str:
         """KIS API 기본 URL"""
-        return f"{self.KIS_BASE_URL}/uapi"
+        return f"{self.KIS_BASE_URL}"
 
 
 @lru_cache()

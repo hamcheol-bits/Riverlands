@@ -154,7 +154,7 @@ class FinancialService:
     ) -> List[Dict[str, Any]]:
         """대차대조표 조회"""
         endpoint = "/uapi/domestic-stock/v1/finance/balance-sheet"
-        tr_id = "FHKST66430200"
+        tr_id = "FHKST66430100"
 
         params = {
             "FID_DIV_CLS_CODE": period_type,
@@ -178,7 +178,7 @@ class FinancialService:
     ) -> List[Dict[str, Any]]:
         """손익계산서 조회"""
         endpoint = "/uapi/domestic-stock/v1/finance/income-statement"
-        tr_id = "FHKST66430300"
+        tr_id = "FHKST66430200"
 
         params = {
             "FID_DIV_CLS_CODE": period_type,
@@ -202,7 +202,7 @@ class FinancialService:
     ) -> List[Dict[str, Any]]:
         """재무비율 조회"""
         endpoint = "/uapi/domestic-stock/v1/finance/financial-ratio"
-        tr_id = "FHKST66430400"
+        tr_id = "FHKST66430300"
 
         params = {
             "FID_DIV_CLS_CODE": period_type,
@@ -226,7 +226,7 @@ class FinancialService:
     ) -> List[Dict[str, Any]]:
         """수익성비율 조회"""
         endpoint = "/uapi/domestic-stock/v1/finance/profit-ratio"
-        tr_id = "FHKST66430500"
+        tr_id = "FHKST66430400"
 
         params = {
             "FID_DIV_CLS_CODE": period_type,
@@ -250,7 +250,7 @@ class FinancialService:
     ) -> List[Dict[str, Any]]:
         """기타주요비율 조회"""
         endpoint = "/uapi/domestic-stock/v1/finance/other-major-ratios"
-        tr_id = "FHKST66430600"
+        tr_id = "FHKST66430500"
 
         params = {
             "FID_DIV_CLS_CODE": period_type,
@@ -274,7 +274,7 @@ class FinancialService:
     ) -> List[Dict[str, Any]]:
         """성장성비율 조회"""
         endpoint = "/uapi/domestic-stock/v1/finance/growth-ratio"
-        tr_id = "FHKST66430900"
+        tr_id = "FHKST66430800"
 
         params = {
             "FID_DIV_CLS_CODE": period_type,
@@ -339,6 +339,9 @@ class FinancialService:
         saved_count = 0
         period_char = "Y" if period_type == "0" else "Q"
 
+        # FinancialStatement 모델의 컬럼 목록 가져오기
+        valid_columns = {c.name for c in FinancialStatement.__table__.columns}
+
         for data in merged_data:
             try:
                 stac_yymm = data.get("stac_yymm")
@@ -370,7 +373,7 @@ class FinancialService:
                     }
 
                     for key, value in data.items():
-                        if key != "stac_yymm" and value is not None:
+                        if key != "stac_yymm" and value is not None and key in valid_columns:
                             fs_data[key] = self._convert_value(key, value)
 
                     fs = FinancialStatement(**fs_data)
