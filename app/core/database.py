@@ -48,20 +48,6 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-def init_db():
-    """데이터베이스 초기화 (테이블 생성)"""
-    try:
-        # 모든 모델을 import하여 Base.metadata에 등록
-        from app.models import stock, stock_price
-
-        # 테이블 생성
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables created successfully")
-    except Exception as e:
-        logger.error(f"Error initializing database: {e}")
-        raise
-
-
 def check_db_connection() -> bool:
     """데이터베이스 연결 확인"""
     try:

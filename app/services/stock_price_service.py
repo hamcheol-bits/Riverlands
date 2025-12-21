@@ -1,10 +1,12 @@
 """
-주가 데이터 수집 서비스 (KIS API 응답 필드명 사용)
+Stock Price 서비스
+주가 데이터 조회, 수집, 관리
 """
 import logging
-from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
+from sqlalchemy import and_, desc
 
 from app.services.kis_client import get_kis_client
 from app.models.stock import Stock
@@ -13,15 +15,153 @@ from app.models.stock_price import StockPrice
 logger = logging.getLogger(__name__)
 
 
-class PriceCollector:
+class StockPriceService:
     """
-    주가 데이터 수집기
+    주가 데이터 서비스
 
-    KIS API 응답 필드명을 그대로 사용하여 데이터베이스에 저장
+    - 주가 조회 (단일/기간/최신)
+    - 주가 수집 (KIS API)
+    - 증분 갱신
     """
 
     def __init__(self):
         self.kis_client = get_kis_client()
+
+    # ============================================================
+    # 조회 기능
+    # ============================================================
+
+    def get_latest_price(
+        self,
+        db: Session,
+        ticker: str
+    ) -> Optional[StockPrice]:
+        """
+        최신 주가 조회
+
+        Args:
+            db: 데이터베이스 세션
+            ticker: 종목코드
+
+        Returns:
+            StockPrice 객체 또는 None
+        """
+        return db.query(StockPrice).filter(
+            StockPrice.ticker == ticker
+        ).order_by(
+            StockPrice.stck_bsop_date.desc()
+        ).first()
+
+    def get_price_by_date(
+        self,
+        db: Session,
+        ticker: str,
+        date: str
+    ) -> Optional[StockPrice]:
+        """
+        특정 날짜 주가 조회
+
+        Args:
+            db: 데이터베이스 세션
+            ticker: 종목코드
+            date: 날짜 (YYYY-MM-DD 또는 YYYYMMDD)
+
+        Returns:
+            StockPrice 객체 또는 None
+        """
+        # 날짜 형식 변환
+        if len(date) == 8:  # YYYYMMDD
+            date_obj = datetime.strptime(date, "%Y%m%d").date()
+        else:  # YYYY-MM-DD
+            date_obj = datetime.strptime(date, "%Y-%m-%d").date()
+
+        return db.query(StockPrice).filter(
+            and_(
+                StockPrice.ticker == ticker,
+                StockPrice.stck_bsop_date == date_obj
+            )
+        ).first()
+
+    def get_prices_by_range(
+        self,
+        db: Session,
+        ticker: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: int = 100
+    ) -> List[StockPrice]:
+        """
+        기간별 주가 조회
+
+        Args:
+            db: 데이터베이스 세션
+            ticker: 종목코드
+            start_date: 시작일 (YYYYMMDD)
+            end_date: 종료일 (YYYYMMDD)
+            limit: 결과 개수 제한
+
+        Returns:
+            StockPrice 리스트
+        """
+        query = db.query(StockPrice).filter(StockPrice.ticker == ticker)
+
+        if start_date:
+            start_obj = datetime.strptime(start_date, "%Y%m%d").date()
+            query = query.filter(StockPrice.stck_bsop_date >= start_obj)
+
+        if end_date:
+            end_obj = datetime.strptime(end_date, "%Y%m%d").date()
+            query = query.filter(StockPrice.stck_bsop_date <= end_obj)
+
+        return query.order_by(
+            StockPrice.stck_bsop_date.desc()
+        ).limit(limit).all()
+
+    def get_recent_prices(
+        self,
+        db: Session,
+        ticker: str,
+        days: int = 30
+    ) -> List[StockPrice]:
+        """
+        최근 N일 주가 조회
+
+        Args:
+            db: 데이터베이스 세션
+            ticker: 종목코드
+            days: 조회 일수
+
+        Returns:
+            StockPrice 리스트
+        """
+        return db.query(StockPrice).filter(
+            StockPrice.ticker == ticker
+        ).order_by(
+            StockPrice.stck_bsop_date.desc()
+        ).limit(days).all()
+
+    def count_prices(
+        self,
+        db: Session,
+        ticker: str
+    ) -> int:
+        """
+        주가 데이터 개수 조회
+
+        Args:
+            db: 데이터베이스 세션
+            ticker: 종목코드
+
+        Returns:
+            레코드 수
+        """
+        return db.query(StockPrice).filter(
+            StockPrice.ticker == ticker
+        ).count()
+
+    # ============================================================
+    # 수집 기능
+    # ============================================================
 
     async def collect_daily_prices(
         self,
@@ -30,17 +170,15 @@ class PriceCollector:
         end_date: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
-        일별 주가 데이터 수집
-
-        KIS API: FHKST03010100 (국내주식기간별시세)
+        KIS API로 일별 주가 수집
 
         Args:
-            ticker: 종목코드 (6자리)
-            start_date: 시작일 (YYYYMMDD, 기본값: 100일 전)
-            end_date: 종료일 (YYYYMMDD, 기본값: 오늘)
+            ticker: 종목코드
+            start_date: 시작일 (YYYYMMDD)
+            end_date: 종료일 (YYYYMMDD)
 
         Returns:
-            주가 데이터 리스트 (KIS API output 필드명 그대로 반환)
+            주가 데이터 리스트
         """
         if not start_date:
             start_date = (datetime.now() - timedelta(days=100)).strftime("%Y%m%d")
@@ -48,48 +186,45 @@ class PriceCollector:
             end_date = datetime.now().strftime("%Y%m%d")
 
         endpoint = "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
-        tr_id = "FHKST03010100"  # 국내주식기간별시세(일/주/월/년)
+        tr_id = "FHKST03010100"
 
         params = {
-            "FID_COND_MRKT_DIV_CODE": "J",  # 시장 분류 코드 (J:주식/ETF/ETN)
-            "FID_INPUT_ISCD": ticker,  # 종목코드
-            "FID_INPUT_DATE_1": start_date,  # 시작일자
-            "FID_INPUT_DATE_2": end_date,  # 종료일자
-            "FID_PERIOD_DIV_CODE": "D",  # 기간 분류 코드 (D:일, W:주, M:월, Y:년)
-            "FID_ORG_ADJ_PRC": "0"  # 수정주가 여부 (0:수정주가 반영 안함, 1:반영)
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": ticker,
+            "FID_INPUT_DATE_1": start_date,
+            "FID_INPUT_DATE_2": end_date,
+            "FID_PERIOD_DIV_CODE": "D",
+            "FID_ORG_ADJ_PRC": "0"
         }
 
         try:
             response = await self.kis_client._request("GET", endpoint, tr_id, params)
 
-            # KIS API 응답 구조: { rt_cd, msg_cd, msg1, output1, output2 }
-            # output2: 일자별 주가 데이터 배열
             if response.get("rt_cd") != "0":
-                logger.warning(f"API Error: {response.get('msg1')}")
+                logger.warning(f"API error: {response.get('msg1')}")
                 return []
 
             prices = response.get("output2", [])
             logger.info(f"Collected {len(prices)} price records for {ticker}")
-
-            return prices  # KIS API 응답 필드명 그대로 반환
+            return prices
 
         except Exception as e:
             logger.error(f"Failed to collect prices for {ticker}: {e}")
             return []
 
-    async def save_prices_to_db(
+    def save_prices(
         self,
         db: Session,
         ticker: str,
         prices: List[Dict[str, Any]]
     ) -> int:
         """
-        수집한 주가 데이터를 DB에 저장
+        주가 데이터 저장
 
         Args:
             db: 데이터베이스 세션
             ticker: 종목코드
-            prices: KIS API 응답 데이터 (output2)
+            prices: KIS API 응답 데이터
 
         Returns:
             저장된 레코드 수
@@ -101,7 +236,6 @@ class PriceCollector:
 
         for item in prices:
             try:
-                # KIS API 응답 필드명 그대로 사용
                 stock_price = StockPrice(
                     ticker=ticker,
                     stck_bsop_date=datetime.strptime(item["stck_bsop_date"], "%Y%m%d").date(),
@@ -118,10 +252,12 @@ class PriceCollector:
                     frgn_ntby_qty=int(item.get("frgn_ntby_qty", 0)) if item.get("frgn_ntby_qty") else None
                 )
 
-                # Upsert: 기존 데이터가 있으면 업데이트, 없으면 삽입
+                # Upsert
                 existing = db.query(StockPrice).filter(
-                    StockPrice.ticker == ticker,
-                    StockPrice.stck_bsop_date == stock_price.stck_bsop_date
+                    and_(
+                        StockPrice.ticker == ticker,
+                        StockPrice.stck_bsop_date == stock_price.stck_bsop_date
+                    )
                 ).first()
 
                 if existing:
@@ -144,13 +280,11 @@ class PriceCollector:
                 saved_count += 1
 
             except Exception as e:
-                logger.error(f"Failed to save price data for {ticker} on {item.get('stck_bsop_date')}: {e}")
+                logger.error(f"Failed to save price for {ticker} on {item.get('stck_bsop_date')}: {e}")
                 continue
 
-        # 커밋
         db.commit()
         logger.info(f"Saved {saved_count} price records for {ticker}")
-
         return saved_count
 
     async def collect_and_save(
@@ -161,13 +295,13 @@ class PriceCollector:
         end_date: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        주가 데이터 수집 및 저장 (통합)
+        주가 수집 및 저장 (통합)
 
         Args:
             db: 데이터베이스 세션
             ticker: 종목코드
-            start_date: 시작일 (YYYYMMDD)
-            end_date: 종료일 (YYYYMMDD)
+            start_date: 시작일
+            end_date: 종료일
 
         Returns:
             수집 결과
@@ -178,8 +312,9 @@ class PriceCollector:
             return {
                 "ticker": ticker,
                 "status": "error",
-                "message": f"Stock {ticker} not found in database",
-                "collected": 0
+                "message": "Stock not found",
+                "collected": 0,
+                "saved": 0
             }
 
         # 데이터 수집
@@ -189,12 +324,13 @@ class PriceCollector:
             return {
                 "ticker": ticker,
                 "status": "no_data",
-                "message": "No price data returned from API",
-                "collected": 0
+                "message": "No price data returned",
+                "collected": 0,
+                "saved": 0
             }
 
         # 데이터 저장
-        saved_count = await self.save_prices_to_db(db, ticker, prices)
+        saved_count = self.save_prices(db, ticker, prices)
 
         return {
             "ticker": ticker,
@@ -209,7 +345,7 @@ class PriceCollector:
         ticker: str
     ) -> Dict[str, Any]:
         """
-        증분 수집 (마지막 수집일 이후 데이터만)
+        증분 수집 (마지막 수집일 이후만)
 
         Args:
             db: 데이터베이스 세션
@@ -224,15 +360,13 @@ class PriceCollector:
         ).order_by(StockPrice.stck_bsop_date.desc()).first()
 
         if last_price:
-            # 마지막 수집일 다음날부터
             start_date = (last_price.stck_bsop_date + timedelta(days=1)).strftime("%Y%m%d")
         else:
-            # 최초 수집: 1년 전부터
             start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
 
         end_date = datetime.now().strftime("%Y%m%d")
 
-        # 이미 최신인 경우
+        # 이미 최신
         if start_date > end_date:
             return {
                 "ticker": ticker,
@@ -245,6 +379,6 @@ class PriceCollector:
         return await self.collect_and_save(db, ticker, start_date, end_date)
 
 
-def get_price_collector() -> PriceCollector:
-    """PriceCollector 싱글톤 반환"""
-    return PriceCollector()
+def get_stock_price_service() -> StockPriceService:
+    """StockPriceService 싱글톤 반환"""
+    return StockPriceService()
