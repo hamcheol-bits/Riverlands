@@ -307,6 +307,20 @@ class FinancialService:
         """stac_yymm 기준으로 데이터 병합"""
         merged = {}
 
+        # 디버깅: 첫 번째 데이터의 필드명 로깅
+        if balance_sheets:
+            logger.debug(f"Balance sheet fields: {list(balance_sheets[0].keys())}")
+        if income_statements:
+            logger.debug(f"Income statement fields: {list(income_statements[0].keys())}")
+        if financial_ratios:
+            logger.debug(f"Financial ratio fields: {list(financial_ratios[0].keys())}")
+        if profit_ratios:
+            logger.debug(f"Profit ratio fields: {list(profit_ratios[0].keys())}")
+        if other_ratios:
+            logger.debug(f"Other ratio fields: {list(other_ratios[0].keys())}")
+        if growth_ratios:
+            logger.debug(f"Growth ratio fields: {list(growth_ratios[0].keys())}")
+
         for bs in balance_sheets:
             yymm = bs.get("stac_yymm")
             if yymm:
@@ -358,14 +372,14 @@ class FinancialService:
                 ).first()
 
                 if existing:
-                    # 업데이트
+                    # 업데이트 (모델에 존재하는 컬럼만)
                     for key, value in data.items():
                         if key == "stac_yymm":
                             continue
-                        if hasattr(existing, key) and value is not None:
+                        if key in valid_columns and hasattr(existing, key) and value is not None:
                             setattr(existing, key, self._convert_value(key, value))
                 else:
-                    # 신규 삽입
+                    # 신규 삽입 (모델에 존재하는 컬럼만)
                     fs_data = {
                         "ticker": ticker,
                         "stac_yymm": stac_yymm,
