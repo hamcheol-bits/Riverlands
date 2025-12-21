@@ -246,10 +246,7 @@ class StockPriceService:
                     acml_vol=int(item["acml_vol"]) if item.get("acml_vol") else None,
                     acml_tr_pbmn=int(item.get("acml_tr_pbmn", 0)) if item.get("acml_tr_pbmn") else None,
                     prdy_vrss=float(item.get("prdy_vrss", 0)) if item.get("prdy_vrss") else None,
-                    prdy_vrss_sign=item.get("prdy_vrss_sign"),
-                    prdy_ctrt=float(item.get("prdy_ctrt", 0)) if item.get("prdy_ctrt") else None,
-                    hts_frgn_ehrt=float(item.get("hts_frgn_ehrt", 0)) if item.get("hts_frgn_ehrt") else None,
-                    frgn_ntby_qty=int(item.get("frgn_ntby_qty", 0)) if item.get("frgn_ntby_qty") else None
+                    prdy_vrss_sign=item.get("prdy_vrss_sign")
                 )
 
                 # Upsert
@@ -270,9 +267,6 @@ class StockPriceService:
                     existing.acml_tr_pbmn = stock_price.acml_tr_pbmn
                     existing.prdy_vrss = stock_price.prdy_vrss
                     existing.prdy_vrss_sign = stock_price.prdy_vrss_sign
-                    existing.prdy_ctrt = stock_price.prdy_ctrt
-                    existing.hts_frgn_ehrt = stock_price.hts_frgn_ehrt
-                    existing.frgn_ntby_qty = stock_price.frgn_ntby_qty
                 else:
                     # 삽입
                     db.add(stock_price)

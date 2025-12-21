@@ -69,15 +69,15 @@ class FinancialStatement(Base):
     # ============================================================
     # 재무비율 (Financial Ratios) - FHKST66430400
     # ============================================================
-    grs = Column(DECIMAL(10, 4), nullable=True, comment="매출액증가율")
-    bsop_prfi_inrt = Column(DECIMAL(10, 4), nullable=True, comment="영업이익증가율")
-    ntin_inrt = Column(DECIMAL(10, 4), nullable=True, comment="순이익증가율")
+    grs = Column(DECIMAL(20, 4), nullable=True, comment="매출액증가율")
+    bsop_prfi_inrt = Column(DECIMAL(20, 4), nullable=True, comment="영업이익증가율")
+    ntin_inrt = Column(DECIMAL(20, 4), nullable=True, comment="순이익증가율")
     roe_val = Column(DECIMAL(10, 4), nullable=True, comment="ROE")
     eps = Column(DECIMAL(15, 2), nullable=True, comment="EPS")
     sps = Column(DECIMAL(15, 2), nullable=True, comment="주당매출액")
     bps = Column(DECIMAL(15, 2), nullable=True, comment="BPS")
-    rsrv_rate = Column(DECIMAL(10, 4), nullable=True, comment="유보율")
-    lblt_rate = Column(DECIMAL(10, 4), nullable=True, comment="부채비율")
+    rsrv_rate = Column(DECIMAL(20, 4), nullable=True, comment="유보율")
+    lblt_rate = Column(DECIMAL(20, 4), nullable=True, comment="부채비율")
 
     # ============================================================
     # 수익성비율 (Profitability Ratios) - FHKST66430500

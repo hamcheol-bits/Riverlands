@@ -36,12 +36,7 @@ class StockPrice(Base):
     # 전일대비 정보
     prdy_vrss = Column(DECIMAL(15, 2), nullable=True, comment="전일대비")
     prdy_vrss_sign = Column(CHAR(1), nullable=True, comment="전일대비부호 (1:상한 2:상승 3:보합 4:하한 5:하락)")
-    prdy_ctrt = Column(DECIMAL(10, 4), nullable=True, comment="전일대비율")
-    
-    # 투자자 정보
-    hts_frgn_ehrt = Column(DECIMAL(10, 4), nullable=True, comment="HTS외국인소진율")
-    frgn_ntby_qty = Column(BIGINT, nullable=True, comment="외국인순매수수량")
-    
+
     # 타임스탬프
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
@@ -63,9 +58,6 @@ class StockPrice(Base):
             "acml_tr_pbmn": self.acml_tr_pbmn,
             "prdy_vrss": float(self.prdy_vrss) if self.prdy_vrss else None,
             "prdy_vrss_sign": self.prdy_vrss_sign,
-            "prdy_ctrt": float(self.prdy_ctrt) if self.prdy_ctrt else None,
-            "hts_frgn_ehrt": float(self.hts_frgn_ehrt) if self.hts_frgn_ehrt else None,
-            "frgn_ntby_qty": self.frgn_ntby_qty,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }
