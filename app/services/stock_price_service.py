@@ -186,7 +186,7 @@ class StockPriceService:
             end_date = datetime.now().strftime("%Y%m%d")
 
         endpoint = "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
-        tr_id = "FHKST03010100"
+        tr_id = "FHKST01010400"
 
         params = {
             "FID_COND_MRKT_DIV_CODE": "J",
