@@ -36,17 +36,6 @@ class FinancialService:
         ticker: str,
         period_type: str = "Y"
     ) -> Optional[FinancialStatement]:
-        """
-        최신 재무제표 조회
-
-        Args:
-            db: 데이터베이스 세션
-            ticker: 종목코드
-            period_type: Y(연간) 또는 Q(분기)
-
-        Returns:
-            FinancialStatement 객체 또는 None
-        """
         return db.query(FinancialStatement).filter(
             and_(
                 FinancialStatement.ticker == ticker,
@@ -63,18 +52,6 @@ class FinancialService:
         stac_yymm: str,
         period_type: str = "Y"
     ) -> Optional[FinancialStatement]:
-        """
-        특정 기간 재무제표 조회
-
-        Args:
-            db: 데이터베이스 세션
-            ticker: 종목코드
-            stac_yymm: 결산년월 (YYYYMM)
-            period_type: Y(연간) 또는 Q(분기)
-
-        Returns:
-            FinancialStatement 객체 또는 None
-        """
         return db.query(FinancialStatement).filter(
             and_(
                 FinancialStatement.ticker == ticker,
@@ -90,18 +67,6 @@ class FinancialService:
         period_type: Optional[str] = None,
         limit: int = 10
     ) -> List[FinancialStatement]:
-        """
-        재무제표 목록 조회
-
-        Args:
-            db: 데이터베이스 세션
-            ticker: 종목코드
-            period_type: Y(연간), Q(분기), None(전체)
-            limit: 조회 개수
-
-        Returns:
-            FinancialStatement 리스트
-        """
         query = db.query(FinancialStatement).filter(
             FinancialStatement.ticker == ticker
         )
@@ -121,17 +86,6 @@ class FinancialService:
         ticker: str,
         period_type: Optional[str] = None
     ) -> int:
-        """
-        재무제표 개수 조회
-
-        Args:
-            db: 데이터베이스 세션
-            ticker: 종목코드
-            period_type: Y(연간), Q(분기), None(전체)
-
-        Returns:
-            레코드 수
-        """
         query = db.query(FinancialStatement).filter(
             FinancialStatement.ticker == ticker
         )
@@ -147,148 +101,50 @@ class FinancialService:
     # KIS API 수집 기능 (6개 API)
     # ============================================================
 
-    async def collect_balance_sheet(
-        self,
-        ticker: str,
-        period_type: str = "0"
-    ) -> List[Dict[str, Any]]:
-        """대차대조표 조회"""
+    async def collect_balance_sheet(self, ticker: str, period_type: str = "0") -> List[Dict[str, Any]]:
         endpoint = "/uapi/domestic-stock/v1/finance/balance-sheet"
         tr_id = "FHKST66430100"
+        return await self._fetch_data(endpoint, tr_id, ticker, period_type)
 
-        params = {
-            "FID_DIV_CLS_CODE": period_type,
-            "fid_cond_mrkt_div_code": "J",
-            "fid_input_iscd": ticker
-        }
-
-        try:
-            response = await self.kis_client._request("GET", endpoint, tr_id, params)
-            if response.get("rt_cd") != "0":
-                return []
-            return response.get("output", [])
-        except Exception as e:
-            logger.error(f"Failed to collect balance sheet for {ticker}: {e}")
-            return []
-
-    async def collect_income_statement(
-        self,
-        ticker: str,
-        period_type: str = "0"
-    ) -> List[Dict[str, Any]]:
-        """손익계산서 조회"""
+    async def collect_income_statement(self, ticker: str, period_type: str = "0") -> List[Dict[str, Any]]:
         endpoint = "/uapi/domestic-stock/v1/finance/income-statement"
         tr_id = "FHKST66430200"
+        return await self._fetch_data(endpoint, tr_id, ticker, period_type)
 
-        params = {
-            "FID_DIV_CLS_CODE": period_type,
-            "fid_cond_mrkt_div_code": "J",
-            "fid_input_iscd": ticker
-        }
-
-        try:
-            response = await self.kis_client._request("GET", endpoint, tr_id, params)
-            if response.get("rt_cd") != "0":
-                return []
-            return response.get("output", [])
-        except Exception as e:
-            logger.error(f"Failed to collect income statement for {ticker}: {e}")
-            return []
-
-    async def collect_financial_ratios(
-        self,
-        ticker: str,
-        period_type: str = "0"
-    ) -> List[Dict[str, Any]]:
-        """재무비율 조회"""
+    async def collect_financial_ratios(self, ticker: str, period_type: str = "0") -> List[Dict[str, Any]]:
         endpoint = "/uapi/domestic-stock/v1/finance/financial-ratio"
         tr_id = "FHKST66430300"
+        return await self._fetch_data(endpoint, tr_id, ticker, period_type)
 
-        params = {
-            "FID_DIV_CLS_CODE": period_type,
-            "fid_cond_mrkt_div_code": "J",
-            "fid_input_iscd": ticker
-        }
-
-        try:
-            response = await self.kis_client._request("GET", endpoint, tr_id, params)
-            if response.get("rt_cd") != "0":
-                return []
-            return response.get("output", [])
-        except Exception as e:
-            logger.error(f"Failed to collect financial ratios for {ticker}: {e}")
-            return []
-
-    async def collect_profit_ratios(
-        self,
-        ticker: str,
-        period_type: str = "0"
-    ) -> List[Dict[str, Any]]:
-        """수익성비율 조회"""
+    async def collect_profit_ratios(self, ticker: str, period_type: str = "0") -> List[Dict[str, Any]]:
         endpoint = "/uapi/domestic-stock/v1/finance/profit-ratio"
         tr_id = "FHKST66430400"
+        return await self._fetch_data(endpoint, tr_id, ticker, period_type)
 
-        params = {
-            "FID_DIV_CLS_CODE": period_type,
-            "fid_cond_mrkt_div_code": "J",
-            "fid_input_iscd": ticker
-        }
-
-        try:
-            response = await self.kis_client._request("GET", endpoint, tr_id, params)
-            if response.get("rt_cd") != "0":
-                return []
-            return response.get("output", [])
-        except Exception as e:
-            logger.error(f"Failed to collect profit ratios for {ticker}: {e}")
-            return []
-
-    async def collect_other_major_ratios(
-        self,
-        ticker: str,
-        period_type: str = "0"
-    ) -> List[Dict[str, Any]]:
-        """기타주요비율 조회"""
+    async def collect_other_major_ratios(self, ticker: str, period_type: str = "0") -> List[Dict[str, Any]]:
         endpoint = "/uapi/domestic-stock/v1/finance/other-major-ratios"
         tr_id = "FHKST66430500"
+        return await self._fetch_data(endpoint, tr_id, ticker, period_type)
 
-        params = {
-            "FID_DIV_CLS_CODE": period_type,
-            "fid_cond_mrkt_div_code": "J",
-            "fid_input_iscd": ticker
-        }
-
-        try:
-            response = await self.kis_client._request("GET", endpoint, tr_id, params)
-            if response.get("rt_cd") != "0":
-                return []
-            return response.get("output", [])
-        except Exception as e:
-            logger.error(f"Failed to collect other major ratios for {ticker}: {e}")
-            return []
-
-    async def collect_growth_ratios(
-        self,
-        ticker: str,
-        period_type: str = "0"
-    ) -> List[Dict[str, Any]]:
-        """성장성비율 조회"""
+    async def collect_growth_ratios(self, ticker: str, period_type: str = "0") -> List[Dict[str, Any]]:
         endpoint = "/uapi/domestic-stock/v1/finance/growth-ratio"
         tr_id = "FHKST66430800"
+        return await self._fetch_data(endpoint, tr_id, ticker, period_type)
 
+    async def _fetch_data(self, endpoint: str, tr_id: str, ticker: str, period_type: str) -> List[Dict[str, Any]]:
+        """API 호출 공통 메서드"""
         params = {
             "FID_DIV_CLS_CODE": period_type,
             "fid_cond_mrkt_div_code": "J",
             "fid_input_iscd": ticker
         }
-
         try:
             response = await self.kis_client._request("GET", endpoint, tr_id, params)
             if response.get("rt_cd") != "0":
                 return []
             return response.get("output", [])
         except Exception as e:
-            logger.error(f"Failed to collect growth ratios for {ticker}: {e}")
+            logger.error(f"Failed to collect data from {endpoint} for {ticker}: {e}")
             return []
 
     # ============================================================
@@ -307,26 +163,15 @@ class FinancialService:
         """stac_yymm 기준으로 데이터 병합"""
         merged = {}
 
-        # 디버깅: 첫 번째 데이터의 필드명 로깅
-        if balance_sheets:
-            logger.debug(f"Balance sheet fields: {list(balance_sheets[0].keys())}")
-        if income_statements:
-            logger.debug(f"Income statement fields: {list(income_statements[0].keys())}")
-        if financial_ratios:
-            logger.debug(f"Financial ratio fields: {list(financial_ratios[0].keys())}")
-        if profit_ratios:
-            logger.debug(f"Profit ratio fields: {list(profit_ratios[0].keys())}")
-        if other_ratios:
-            logger.debug(f"Other ratio fields: {list(other_ratios[0].keys())}")
-        if growth_ratios:
-            logger.debug(f"Growth ratio fields: {list(growth_ratios[0].keys())}")
+        # 모든 데이터 소스를 순회하며 병합
+        sources = [
+            balance_sheets, income_statements, financial_ratios,
+            profit_ratios, other_ratios, growth_ratios
+        ]
 
-        for bs in balance_sheets:
-            yymm = bs.get("stac_yymm")
-            if yymm:
-                merged[yymm] = bs.copy()
-
-        for source in [income_statements, financial_ratios, profit_ratios, other_ratios, growth_ratios]:
+        for source in sources:
+            if not source:
+                continue
             for item in source:
                 yymm = item.get("stac_yymm")
                 if yymm:
@@ -336,7 +181,6 @@ class FinancialService:
                         merged[yymm] = item.copy()
 
         sorted_data = sorted(merged.values(), key=lambda x: x.get("stac_yymm", ""), reverse=True)
-        logger.info(f"Merged {len(sorted_data)} financial periods")
         return sorted_data
 
     def save_financials(
@@ -352,8 +196,6 @@ class FinancialService:
 
         saved_count = 0
         period_char = "Y" if period_type == "0" else "Q"
-
-        # FinancialStatement 모델의 컬럼 목록 가져오기
         valid_columns = {c.name for c in FinancialStatement.__table__.columns}
 
         for data in merged_data:
@@ -362,7 +204,6 @@ class FinancialService:
                 if not stac_yymm:
                     continue
 
-                # Upsert
                 existing = db.query(FinancialStatement).filter(
                     and_(
                         FinancialStatement.ticker == ticker,
@@ -372,23 +213,25 @@ class FinancialService:
                 ).first()
 
                 if existing:
-                    # 업데이트 (모델에 존재하는 컬럼만)
                     for key, value in data.items():
                         if key == "stac_yymm":
                             continue
                         if key in valid_columns and hasattr(existing, key) and value is not None:
-                            setattr(existing, key, self._convert_value(key, value))
+                            converted_val = self._convert_value(key, value)
+                            # 변환된 값이 None이 아니거나, 원래 의도가 NULL인 경우 처리
+                            if converted_val is not None:
+                                setattr(existing, key, converted_val)
                 else:
-                    # 신규 삽입 (모델에 존재하는 컬럼만)
                     fs_data = {
                         "ticker": ticker,
                         "stac_yymm": stac_yymm,
                         "period_type": period_char
                     }
-
                     for key, value in data.items():
                         if key != "stac_yymm" and value is not None and key in valid_columns:
-                            fs_data[key] = self._convert_value(key, value)
+                            converted_val = self._convert_value(key, value)
+                            if converted_val is not None:
+                                fs_data[key] = converted_val
 
                     fs = FinancialStatement(**fs_data)
                     db.add(fs)
@@ -400,11 +243,10 @@ class FinancialService:
                 continue
 
         db.commit()
-        logger.info(f"Saved {saved_count} financial records for {ticker} ({period_char})")
         return saved_count
 
     def _convert_value(self, key: str, value):
-        """데이터 타입 변환"""
+        """데이터 타입 변환 (수정됨: 소수점 포함 문자열 처리)"""
         bigint_fields = ['cras', 'fxas', 'total_aset', 'flow_lblt', 'fix_lblt',
                         'total_lblt', 'cpfn', 'total_cptl', 'sale_account',
                         'sale_cost', 'sale_totl_prfi', 'bsop_prti', 'op_prfi',
@@ -416,13 +258,25 @@ class FinancialService:
                          'ev_ebitda', 'equt_inrt', 'totl_aset_inrt']
 
         try:
+            if value is None:
+                return None
+
+            # 문자열인 경우 쉼표 제거
+            if isinstance(value, str):
+                value = value.replace(',', '').strip()
+                if not value:
+                    return None
+
             if key in bigint_fields:
-                return int(value)
+                # "123.00" 문자열을 int로 바로 변환하면 에러 발생
+                # float로 먼저 변환 후 int로 캐스팅
+                return int(float(value))
             elif key in decimal_fields:
                 return float(value)
             else:
                 return value
         except (ValueError, TypeError):
+            # 변환 실패 시 로그를 남기는 것이 좋으나, 너무 많을 수 있으므로 생략하거나 debug로 처리
             return None
 
     async def collect_and_save(
@@ -431,18 +285,7 @@ class FinancialService:
         ticker: str,
         period_type: str = "0"
     ) -> Dict[str, Any]:
-        """
-        재무제표 수집 및 저장 (통합)
-
-        Args:
-            db: 데이터베이스 세션
-            ticker: 종목코드
-            period_type: 0(연간), 1(분기)
-
-        Returns:
-            수집 결과
-        """
-        # 종목 존재 확인
+        """재무제표 수집 및 저장 (통합)"""
         stock = db.query(Stock).filter(Stock.ticker == ticker).first()
         if not stock:
             return {
@@ -452,7 +295,6 @@ class FinancialService:
                 "saved": 0
             }
 
-        # 6개 API 호출
         balance_sheets = await self.collect_balance_sheet(ticker, period_type)
         income_statements = await self.collect_income_statement(ticker, period_type)
         financial_ratios = await self.collect_financial_ratios(ticker, period_type)
@@ -460,7 +302,6 @@ class FinancialService:
         other_ratios = await self.collect_other_major_ratios(ticker, period_type)
         growth_ratios = await self.collect_growth_ratios(ticker, period_type)
 
-        # 데이터 병합
         merged_data = self.merge_financial_data(
             balance_sheets, income_statements, financial_ratios,
             profit_ratios, other_ratios, growth_ratios
@@ -474,7 +315,6 @@ class FinancialService:
                 "saved": 0
             }
 
-        # 저장
         saved_count = self.save_financials(db, ticker, period_type, merged_data)
 
         return {
@@ -487,5 +327,4 @@ class FinancialService:
 
 
 def get_financial_service() -> FinancialService:
-    """FinancialService 싱글톤 반환"""
     return FinancialService()
