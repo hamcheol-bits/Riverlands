@@ -220,11 +220,15 @@ class BatchService:
 
         # 각 종목 처리
         for idx, stock in enumerate(stocks, 1):
-            logger.info(f"Processing {idx}/{total_stocks}: {stock.ticker} ({stock.hts_kor_isnm})")
+            # 미리 ticker 정보를 변수에 담아둠 (세션 에러 시 객체 접근 보호)
+            ticker = stock.ticker
+            name = stock.hts_kor_isnm
+
+            logger.info(f"Processing {idx}/{total_stocks}: {ticker} ({name})")
 
             try:
                 result = await self.financial_service.collect_and_save(
-                    db, stock.ticker, period_type
+                    db, ticker, period_type
                 )
 
                 if result["status"] == "success":
@@ -234,9 +238,10 @@ class BatchService:
                 results.append(result)
 
             except Exception as e:
-                logger.error(f"Failed to process {stock.ticker}: {e}")
+                db.rollback()
+                logger.error(f"Failed to process {ticker}: {e}")
                 results.append({
-                    "ticker": stock.ticker,
+                    "ticker": ticker,
                     "status": "error",
                     "message": str(e)
                 })
