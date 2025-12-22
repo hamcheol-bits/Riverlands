@@ -18,11 +18,11 @@ router = APIRouter(prefix="/api/batch", tags=["batch"])
 
 @router.post("/stocks/{market}")
 async def batch_collect_stocks(
-        market: str,
-        use_api: bool = Query(True, description="KIS API 사용 여부"),
-        date: Optional[str] = Query(None, description="기준일 (YYYYMMDD)"),
-        limit: Optional[int] = Query(None, description="수집 제한 (테스트용)"),
-        db: Session = Depends(get_db)
+    market: str,
+    use_api: bool = Query(True, description="KIS API 사용 여부"),
+    date: Optional[str] = Query(None, description="기준일 (YYYYMMDD)"),
+    limit: Optional[int] = Query(None, description="수집 제한 (테스트용)"),
+    db: Session = Depends(get_db)
 ):
     """
     시장별 종목 정보 배치 수집
@@ -57,14 +57,14 @@ async def batch_collect_stocks(
 
 @router.post("/prices/{market}")
 async def batch_collect_prices(
-        market: str,
-        background_tasks: BackgroundTasks,
-        mode: str = Query("incremental", description="incremental 또는 full"),
-        start_date: Optional[str] = Query(None, description="시작일 (YYYYMMDD)"),
-        end_date: Optional[str] = Query(None, description="종료일 (YYYYMMDD)"),
-        limit: Optional[int] = Query(None, description="처리 종목 수 제한"),
-        run_background: bool = Query(False, description="백그라운드 실행 여부"),
-        db: Session = Depends(get_db)
+    market: str,
+    background_tasks: BackgroundTasks,
+    mode: str = Query("incremental", description="incremental 또는 full"),
+    start_date: Optional[str] = Query(None, description="시작일 (YYYYMMDD)"),
+    end_date: Optional[str] = Query(None, description="종료일 (YYYYMMDD)"),
+    limit: Optional[int] = Query(None, description="처리 종목 수 제한"),
+    run_background: bool = Query(False, description="백그라운드 실행 여부"),
+    db: Session = Depends(get_db)
 ):
     """
     시장별 주가 배치 수집
@@ -118,12 +118,12 @@ async def batch_collect_prices(
 
 @router.post("/financials/{market}")
 async def batch_collect_financials(
-        market: str,
-        background_tasks: BackgroundTasks,
-        period_type: str = Query("0", description="0(연간), 1(분기)"),
-        limit: Optional[int] = Query(None, description="처리 종목 수 제한"),
-        run_background: bool = Query(False, description="백그라운드 실행 여부"),
-        db: Session = Depends(get_db)
+    market: str,
+    background_tasks: BackgroundTasks,
+    period_type: str = Query("0", description="0(연간), 1(분기)"),
+    limit: Optional[int] = Query(None, description="처리 종목 수 제한"),
+    run_background: bool = Query(False, description="백그라운드 실행 여부"),
+    db: Session = Depends(get_db)
 ):
     """
     시장별 재무제표 배치 수집
@@ -176,15 +176,15 @@ async def batch_collect_financials(
 
 @router.post("/all/{market}")
 async def batch_collect_all(
-        market: str,
-        background_tasks: BackgroundTasks,
-        include_stocks: bool = Query(True, description="종목 정보 수집"),
-        include_prices: bool = Query(True, description="주가 수집"),
-        include_financials: bool = Query(True, description="재무제표 수집"),
-        price_mode: str = Query("incremental", description="주가 수집 모드"),
-        limit: Optional[int] = Query(None, description="처리 종목 수 제한"),
-        run_background: bool = Query(False, description="백그라운드 실행 여부"),
-        db: Session = Depends(get_db)
+    market: str,
+    background_tasks: BackgroundTasks,
+    include_stocks: bool = Query(True, description="종목 정보 수집"),
+    include_prices: bool = Query(True, description="주가 수집"),
+    include_financials: bool = Query(True, description="재무제표 수집"),
+    price_mode: str = Query("incremental", description="주가 수집 모드"),
+    limit: Optional[int] = Query(None, description="처리 종목 수 제한"),
+    run_background: bool = Query(False, description="백그라운드 실행 여부"),
+    db: Session = Depends(get_db)
 ):
     """
     시장별 전체 데이터 통합 수집
@@ -244,12 +244,12 @@ async def batch_collect_all(
 
 @router.post("/tickers")
 async def batch_collect_tickers(
-        tickers: List[str] = Query(..., description="종목코드 리스트"),
-        include_stocks: bool = Query(True, description="종목 정보 수집"),
-        include_prices: bool = Query(True, description="주가 수집"),
-        include_financials: bool = Query(True, description="재무제표 수집"),
-        price_mode: str = Query("incremental", description="주가 수집 모드"),
-        db: Session = Depends(get_db)
+    tickers: List[str] = Query(..., description="종목코드 리스트"),
+    include_stocks: bool = Query(True, description="종목 정보 수집"),
+    include_prices: bool = Query(True, description="주가 수집"),
+    include_financials: bool = Query(True, description="재무제표 수집"),
+    price_mode: str = Query("incremental", description="주가 수집 모드"),
+    db: Session = Depends(get_db)
 ):
     """
     여러 티커 일괄 수집
@@ -335,6 +335,12 @@ async def get_batch_status(db: Session = Depends(get_db)):
         FinancialStatement.period_type == "Q"
     ).scalar()
 
+    # 배당 통계
+    from app.models.dividend import Dividend
+    stocks_with_dividend = db.query(Dividend.ticker).distinct().count()
+    total_dividend_records = db.query(Dividend).count()
+    latest_dividend_date = db.query(func.max(Dividend.record_date)).scalar()
+
     return {
         "stocks": {
             "total": total_stocks,
@@ -356,5 +362,89 @@ async def get_batch_status(db: Session = Depends(get_db)):
             "stocks_with_data": stocks_with_quarterly,
             "coverage_rate": f"{stocks_with_quarterly / total_stocks * 100:.1f}%" if total_stocks > 0 else "0%",
             "latest_period": latest_quarterly
+        },
+        "dividends": {
+            "stocks_with_data": stocks_with_dividend,
+            "coverage_rate": f"{stocks_with_dividend / total_stocks * 100:.1f}%" if total_stocks > 0 else "0%",
+            "total_records": total_dividend_records,
+            "latest_date": str(latest_dividend_date) if latest_dividend_date else None
         }
     }
+
+
+# ============================================================
+# 시장별 배당 배치
+# ============================================================
+
+@router.post("/dividends/{market}")
+async def batch_collect_dividends(
+        market: str,
+        background_tasks: BackgroundTasks,
+        year: Optional[int] = Query(None, ge=2000, le=2030, description="조회 연도 (예: 2025, 미지정시 최근 3년)"),
+        incremental: bool = Query(False, description="증분 수집 여부"),
+        limit: Optional[int] = Query(None, description="처리 종목 수 제한"),
+        run_background: bool = Query(False, description="백그라운드 실행 여부"),
+        db: Session = Depends(get_db)
+):
+    """
+    시장별 배당 정보 배치 수집
+
+    Args:
+        market: KOSPI, KOSDAQ, ALL
+        year: 조회 연도 (예: 2025, 미지정시 최근 3년)
+        incremental: 증분 수집 여부 (기본값: False)
+        limit: 처리 종목 수 제한
+        run_background: 백그라운드 실행 여부
+
+    Examples:
+        - POST /api/batch/dividends/KOSPI
+          → KOSPI 전체, 최근 3년
+        - POST /api/batch/dividends/KOSPI?year=2025
+          → KOSPI 전체, 2025년만 (20250101~20251231)
+        - POST /api/batch/dividends/KOSDAQ?year=2024&limit=10
+          → KOSDAQ 10종목, 2024년만
+        - POST /api/batch/dividends/ALL?incremental=true&run_background=true
+          → 전체 시장, 증분 수집, 백그라운드
+
+    Returns:
+        배치 수집 결과
+
+    Note:
+        - year 지정: 해당 연도 1월 1일 ~ 12월 31일
+        - year 미지정: 현재부터 과거 3년
+        - incremental=true: 각 종목의 마지막 배당 기준일 이후만 조회
+        - incremental=false: 모든 종목에 대해 지정된 year 조회
+        - 종목코드는 자동으로 9자리로 변환
+        - 결산배당과 중간배당 모두 수집 (GB1=0)
+        - API 호출 제한 고려하여 적절한 딜레이 적용
+    """
+    market = market.upper()
+    if market not in ["KOSPI", "KOSDAQ", "ALL"]:
+        return {"status": "error", "message": "market must be KOSPI, KOSDAQ, or ALL"}
+
+    service = get_batch_service()
+
+    # 백그라운드 실행
+    if run_background:
+        background_tasks.add_task(
+            service.batch_collect_dividends,
+            db, market, year, incremental, limit
+        )
+
+        msg_parts = [f"Dividend batch collection started for {market}"]
+        if year:
+            msg_parts.append(f"year {year}")
+        if incremental:
+            msg_parts.append("(incremental)")
+
+        return {
+            "status": "background_task_started",
+            "market": market,
+            "year": year,
+            "incremental": incremental,
+            "message": " ".join(msg_parts)
+        }
+
+    # 동기 실행
+    result = await service.batch_collect_dividends(db, market, year, incremental, limit)
+    return result

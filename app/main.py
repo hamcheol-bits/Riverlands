@@ -72,9 +72,35 @@ async def health_check(db: Session = Depends(get_db)):
         logger.error(f"Database health check failed: {e}")
         db_status = "unhealthy"
 
+    # Redis 토큰 확인 (없으면 빈 문자열)
+    redis_token = ""
+    redis_ttl = None
+    redis_status = "unavailable"
+
+    try:
+        from app.core.redis_client import get_redis_client
+        redis_client = get_redis_client()
+
+        if redis_client:
+            redis_status = "connected"
+            # 토큰 조회 (새로 발급하지 않고 캐시만 확인)
+            token = redis_client.get(settings.REDIS_TOKEN_KEY)
+            if token:
+                redis_token = token
+                redis_ttl = redis_client.ttl(settings.REDIS_TOKEN_KEY)
+    except Exception as e:
+        logger.warning(f"Redis health check failed: {e}")
+        redis_status = "error"
+
     return {
         "status": "ok",
         "database": db_status,
+        "redis": {
+            "status": redis_status,
+            "token": redis_token,
+            "ttl_seconds": redis_ttl,
+            "ttl_hours": round(redis_ttl / 3600, 2) if redis_ttl and redis_ttl > 0 else None
+        },
         "version": settings.VERSION
     }
 
@@ -82,12 +108,13 @@ async def health_check(db: Session = Depends(get_db)):
 # ============================================================
 # 라우터 등록 (모듈화된 구조)
 # ============================================================
-from app.routers import stocks, stock_prices, financials, batch
+from app.routers import stocks, stock_prices, financials, batch, dividends
 
 app.include_router(stocks.router)
 app.include_router(stock_prices.router)
 app.include_router(financials.router)
 app.include_router(batch.router)
+app.include_router(dividends.router)
 
 logger.info("All routers registered successfully")
 

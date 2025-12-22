@@ -10,6 +10,7 @@ from app.models.stock import Stock
 from app.services.stock_service import get_stock_service
 from app.services.stock_price_service import get_stock_price_service
 from app.services.financial_service import get_financial_service
+from app.services.dividend_service import get_dividend_service
 
 logger = logging.getLogger(__name__)
 
@@ -28,18 +29,19 @@ class BatchService:
         self.stock_service = get_stock_service()
         self.price_service = get_stock_price_service()
         self.financial_service = get_financial_service()
+        self.dividend_service = get_dividend_service()
 
     # ============================================================
     # 시장별 종목 정보 배치
     # ============================================================
 
     async def batch_collect_stocks(
-            self,
-            db: Session,
-            market: str = "ALL",
-            use_api: bool = True,
-            date: Optional[str] = None,
-            limit: Optional[int] = None
+        self,
+        db: Session,
+        market: str = "ALL",
+        use_api: bool = True,
+        date: Optional[str] = None,
+        limit: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         시장별 종목 정보 배치 수집
@@ -85,13 +87,13 @@ class BatchService:
     # ============================================================
 
     async def batch_collect_prices(
-            self,
-            db: Session,
-            market: str = "ALL",
-            mode: str = "incremental",
-            start_date: Optional[str] = None,
-            end_date: Optional[str] = None,
-            limit: Optional[int] = None
+        self,
+        db: Session,
+        market: str = "ALL",
+        mode: str = "incremental",
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         시장별 주가 배치 수집
@@ -177,11 +179,11 @@ class BatchService:
     # ============================================================
 
     async def batch_collect_financials(
-            self,
-            db: Session,
-            market: str = "ALL",
-            period_type: str = "0",
-            limit: Optional[int] = None
+        self,
+        db: Session,
+        market: str = "ALL",
+        period_type: str = "0",
+        limit: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         시장별 재무제표 배치 수집
@@ -220,15 +222,11 @@ class BatchService:
 
         # 각 종목 처리
         for idx, stock in enumerate(stocks, 1):
-            # 미리 ticker 정보를 변수에 담아둠 (세션 에러 시 객체 접근 보호)
-            ticker = stock.ticker
-            name = stock.hts_kor_isnm
-
-            logger.info(f"Processing {idx}/{total_stocks}: {ticker} ({name})")
+            logger.info(f"Processing {idx}/{total_stocks}: {stock.ticker} ({stock.hts_kor_isnm})")
 
             try:
                 result = await self.financial_service.collect_and_save(
-                    db, ticker, period_type
+                    db, stock.ticker, period_type
                 )
 
                 if result["status"] == "success":
@@ -238,10 +236,9 @@ class BatchService:
                 results.append(result)
 
             except Exception as e:
-                db.rollback()
-                logger.error(f"Failed to process {ticker}: {e}")
+                logger.error(f"Failed to process {stock.ticker}: {e}")
                 results.append({
-                    "ticker": ticker,
+                    "ticker": stock.ticker,
                     "status": "error",
                     "message": str(e)
                 })
@@ -265,14 +262,14 @@ class BatchService:
     # ============================================================
 
     async def batch_collect_all(
-            self,
-            db: Session,
-            market: str = "ALL",
-            include_stocks: bool = True,
-            include_prices: bool = True,
-            include_financials: bool = True,
-            price_mode: str = "incremental",
-            limit: Optional[int] = None
+        self,
+        db: Session,
+        market: str = "ALL",
+        include_stocks: bool = True,
+        include_prices: bool = True,
+        include_financials: bool = True,
+        price_mode: str = "incremental",
+        limit: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         시장별 전체 데이터 통합 수집
@@ -356,13 +353,13 @@ class BatchService:
     # ============================================================
 
     async def batch_collect_tickers(
-            self,
-            db: Session,
-            tickers: List[str],
-            include_stocks: bool = True,
-            include_prices: bool = True,
-            include_financials: bool = True,
-            price_mode: str = "incremental"
+        self,
+        db: Session,
+        tickers: List[str],
+        include_stocks: bool = True,
+        include_prices: bool = True,
+        include_financials: bool = True,
+        price_mode: str = "incremental"
     ) -> Dict[str, Any]:
         """
         여러 티커 일괄 수집
@@ -451,6 +448,104 @@ class BatchService:
             "success_count": success_count,
             "results": results
         }
+
+    # ============================================================
+    # 시장별 배당 배치
+    # ============================================================
+
+    async def batch_collect_dividends(
+            self,
+            db: Session,
+            market: str = "ALL",
+            year: Optional[int] = None,
+            incremental: bool = False,
+            limit: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        시장별 배당 정보 배치 수집
+
+        Args:
+            db: 데이터베이스 세션
+            market: KOSPI, KOSDAQ, ALL
+            year: 조회 연도 (예: 2025, None이면 최근 3년)
+            incremental: 증분 수집 여부 (기본값: False)
+            limit: 처리 종목 수 제한
+
+        Returns:
+            배치 수집 결과
+        """
+        market = market.upper()
+        period_info = f"year {year}" if year else "last 3 years"
+        logger.info(f"Starting batch dividend collection for {market} ({period_info}, incremental={incremental})")
+
+        # 종목 리스트 조회
+        query = db.query(Stock).filter(Stock.is_active == True)
+
+        if market != "ALL":
+            query = query.filter(Stock.mrkt_ctg_cls_code == market)
+
+        if limit:
+            query = query.limit(limit)
+
+        stocks = query.all()
+        total_stocks = len(stocks)
+
+        logger.info(f"Found {total_stocks} stocks to process")
+
+        # 결과 집계
+        success_count = 0
+        total_collected = 0
+        total_saved = 0
+        results = []
+
+        # 각 종목 처리
+        for idx, stock in enumerate(stocks, 1):
+            ticker = stock.ticker
+            name = stock.hts_kor_isnm
+
+            logger.info(f"Processing {idx}/{total_stocks}: {ticker} ({name})")
+
+            try:
+                if incremental:
+                    result = await self.dividend_service.collect_incremental(db, ticker)
+                else:
+                    result = await self.dividend_service.collect_and_save(db, ticker, year)
+
+                if result["status"] in ["success", "up_to_date"]:
+                    success_count += 1
+                    total_collected += result.get("collected", 0)
+                    total_saved += result.get("saved", 0)
+
+                results.append(result)
+
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Failed to process {ticker}: {e}")
+                results.append({
+                    "ticker": ticker,
+                    "status": "error",
+                    "message": str(e)
+                })
+
+        logger.info(
+            f"Batch dividend collection completed: {success_count}/{total_stocks} stocks, "
+            f"collected: {total_collected}, saved: {total_saved}"
+        )
+
+        batch_result = {
+            "market": market,
+            "incremental": incremental,
+            "total_stocks": total_stocks,
+            "success_count": success_count,
+            "total_collected": total_collected,
+            "total_saved": total_saved,
+            "results": results
+        }
+
+        if year:
+            batch_result["year"] = year
+
+        return batch_result
 
 
 def get_batch_service() -> BatchService:
