@@ -201,20 +201,33 @@ class DividendService:
             "HIGH_GB": ""  # 고배당여부 (공백)
         }
 
+        # 디버깅: 요청 정보 출력
+        logger.info(f"=== KIS API Request for {ticker} ===")
+        logger.info(f"Endpoint: {endpoint}")
+        logger.info(f"TR_ID: {tr_id}")
+        logger.info(f"Params: {params}")
+
         try:
             response = await self.kis_client._request("GET", endpoint, tr_id, params)
 
+            # 디버깅: API 응답 전체 출력
+            logger.info(f"=== KIS API Response for {ticker} ===")
+            logger.info(f"Response: {response}")
+
             if response.get("rt_cd") != "0":
-                logger.warning(f"API error: {response.get('msg1')}")
+                logger.warning(f"API error for {ticker}: rt_cd={response.get('rt_cd')}, msg1={response.get('msg1')}")
                 return []
 
-            dividends = response.get("output", [])
+            # output1 필드에서 배당 데이터 추출
+            dividends = response.get("output1", [])
             period_info = f"year {year}" if year else "last 3 years"
             logger.info(f"Collected {len(dividends)} dividend records for {ticker} ({period_info})")
             return dividends
 
         except Exception as e:
             logger.error(f"Failed to collect dividends for {ticker}: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return []
 
     def save_dividends(
