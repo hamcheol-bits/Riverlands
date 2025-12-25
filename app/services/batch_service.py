@@ -548,6 +548,101 @@ class BatchService:
         return batch_result
 
 
+    # ============================================================
+    # 시장별 투자의견 배치 (batch_service.py에 추가)
+    # ============================================================
+
+    async def batch_collect_investment_opinions(
+            self,
+            db: Session,
+            market: str = "ALL",
+            start_date: Optional[str] = None,
+            end_date: Optional[str] = None,
+            limit: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        시장별 투자의견 컨센서스 배치 수집
+
+        Args:
+            db: 데이터베이스 세션
+            market: KOSPI, KOSDAQ, ALL
+            start_date: 시작일 (YYYYMMDD), 기본값: 6개월 전
+            end_date: 종료일 (YYYYMMDD), 기본값: 오늘
+            limit: 처리 종목 수 제한
+
+        Returns:
+            배치 수집 결과
+        """
+        from app.services.investment_opinion_service import get_investment_opinion_service
+
+        market = market.upper()
+        logger.info(f"Starting batch investment opinion collection for {market}")
+
+        # 종목 리스트 조회
+        query = db.query(Stock).filter(Stock.is_active == True)
+
+        if market != "ALL":
+            query = query.filter(Stock.mrkt_ctg_cls_code == market)
+
+        if limit:
+            query = query.limit(limit)
+
+        stocks = query.all()
+        total_stocks = len(stocks)
+
+        logger.info(f"Found {total_stocks} stocks to process")
+
+        # 투자의견 서비스
+        opinion_service = get_investment_opinion_service()
+
+        # 결과 집계
+        success_count = 0
+        total_collected = 0
+        total_updated = 0
+        results = []
+
+        # 각 종목 처리
+        for idx, stock in enumerate(stocks, 1):
+            ticker = stock.ticker
+            name = stock.hts_kor_isnm
+
+            logger.info(f"Processing {idx}/{total_stocks}: {ticker} ({name})")
+
+            try:
+                result = await opinion_service.collect_investment_opinions(
+                    db, ticker, start_date, end_date
+                )
+
+                if result["message"] == "Success":
+                    success_count += 1
+                    total_collected += result.get("collected", 0)
+                    total_updated += result.get("updated", 0)
+
+                results.append(result)
+
+            except Exception as e:
+                db.rollback()
+                logger.error(f"Failed to process {ticker}: {e}")
+                results.append({
+                    "ticker": ticker,
+                    "status": "error",
+                    "message": str(e)
+                })
+
+        logger.info(
+            f"Batch investment opinion collection completed: {success_count}/{total_stocks} stocks, "
+            f"collected: {total_collected}, updated: {total_updated}"
+        )
+
+        return {
+            "market": market,
+            "total_stocks": total_stocks,
+            "success_count": success_count,
+            "total_collected": total_collected,
+            "total_updated": total_updated,
+            "results": results
+        }
+
 def get_batch_service() -> BatchService:
     """BatchService 싱글톤 반환"""
     return BatchService()

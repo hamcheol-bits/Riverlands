@@ -31,12 +31,18 @@ async def lifespan(app: FastAPI):
     else:
         logger.error("Database connection failed")
 
-    # KIS 인증 매니저 초기화
+    # KIS 인증 매니저 초기화 및 토큰 발급
     try:
         auth_manager = get_auth_manager()
         logger.info("KIS Auth manager initialized")
+
+        # ✅ 서버 시작 시 토큰 미리 발급하여 Redis에 저장
+        token = await auth_manager.get_access_token()
+        logger.info(f"KIS access token obtained and cached in Redis (valid for 24h)")
+
     except Exception as e:
-        logger.error(f"Auth manager initialization failed: {e}")
+        logger.error(f"Failed to initialize auth or obtain token: {e}")
+        # 토큰 발급 실패해도 서버는 시작 (첫 API 요청 시 재시도)
 
     yield
 
@@ -108,13 +114,14 @@ async def health_check(db: Session = Depends(get_db)):
 # ============================================================
 # 라우터 등록 (모듈화된 구조)
 # ============================================================
-from app.routers import stocks, stock_prices, financials, batch, dividends
+from app.routers import stocks, stock_prices, financials, batch, dividends, investment_opinion
 
 app.include_router(stocks.router)
 app.include_router(stock_prices.router)
 app.include_router(financials.router)
 app.include_router(batch.router)
 app.include_router(dividends.router)
+app.include_router(investment_opinion.router)
 
 logger.info("All routers registered successfully")
 

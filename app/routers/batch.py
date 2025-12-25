@@ -448,3 +448,71 @@ async def batch_collect_dividends(
     # 동기 실행
     result = await service.batch_collect_dividends(db, market, year, incremental, limit)
     return result
+
+@router.post("/investment-opinions/{market}")
+async def batch_collect_investment_opinions(
+        market: str,
+        background_tasks: BackgroundTasks,
+        start_date: Optional[str] = Query(None, description="시작일 (YYYYMMDD), 기본값: 6개월 전"),
+        end_date: Optional[str] = Query(None, description="종료일 (YYYYMMDD), 기본값: 오늘"),
+        limit: Optional[int] = Query(None, description="처리 종목 수 제한"),
+        run_background: bool = Query(False, description="백그라운드 실행 여부"),
+        db: Session = Depends(get_db)
+):
+    """
+    시장별 투자의견 컨센서스 배치 수집
+
+    Args:
+        market: KOSPI, KOSDAQ, ALL
+        start_date: 시작일 (YYYYMMDD), 기본값: 6개월 전
+        end_date: 종료일 (YYYYMMDD), 기본값: 오늘
+        limit: 처리 종목 수 제한
+        run_background: 백그라운드 실행 여부
+
+    Examples:
+        - POST /api/batch/investment-opinions/KOSPI
+          → KOSPI 전체, 최근 6개월
+        - POST /api/batch/investment-opinions/KOSPI?start_date=20240101&end_date=20241231
+          → KOSPI 전체, 2024년
+        - POST /api/batch/investment-opinions/KOSDAQ?limit=10
+          → KOSDAQ 10종목, 최근 6개월
+        - POST /api/batch/investment-opinions/ALL?run_background=true
+          → 전체 시장, 백그라운드
+
+    Returns:
+        배치 수집 결과
+
+    Note:
+        - start_date 미지정: 6개월 전부터
+        - end_date 미지정: 오늘까지
+        - 증권사별 최신 투자의견만 유지 (UPSERT)
+        - API 호출 제한 고려하여 적절한 딜레이 적용
+    """
+    market = market.upper()
+    if market not in ["KOSPI", "KOSDAQ", "ALL"]:
+        return {"status": "error", "message": "market must be KOSPI, KOSDAQ, or ALL"}
+
+    service = get_batch_service()
+
+    # 백그라운드 실행
+    if run_background:
+        background_tasks.add_task(
+            service.batch_collect_investment_opinions,
+            db, market, start_date, end_date, limit
+        )
+
+        msg_parts = [f"Investment opinion batch collection started for {market}"]
+        if start_date or end_date:
+            msg_parts.append(f"({start_date or '6mo ago'} ~ {end_date or 'today'})")
+
+        return {
+            "status": "background_task_started",
+            "market": market,
+            "start_date": start_date,
+            "end_date": end_date,
+            "message": " ".join(msg_parts)
+        }
+
+    # 동기 실행
+    result = await service.batch_collect_investment_opinions(db, market, start_date, end_date, limit)
+    return result
