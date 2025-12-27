@@ -317,6 +317,12 @@ class FinancialService:
 
         saved_count = self.save_financials(db, ticker, period_type, merged_data)
 
+        # ✅ 연간 재무제표 저장 후 밸류에이션 갱신
+        if saved_count > 0 and period_type == "0":  # 연간만
+            from app.services.valuation_service import get_valuation_service
+            valuation_service = get_valuation_service()
+            valuation_service.update_valuation_for_ticker(db, ticker)
+
         return {
             "ticker": ticker,
             "status": "success",

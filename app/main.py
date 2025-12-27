@@ -114,7 +114,8 @@ async def health_check(db: Session = Depends(get_db)):
 # ============================================================
 # 라우터 등록 (모듈화된 구조)
 # ============================================================
-from app.routers import stocks, stock_prices, financials, batch, dividends, investment_opinion, naver_research
+from app.routers import stocks, stock_prices, financials, batch, dividends, investment_opinion, naver_research, \
+    valuation
 
 app.include_router(stocks.router)
 app.include_router(stock_prices.router)
@@ -123,6 +124,7 @@ app.include_router(batch.router)
 app.include_router(dividends.router)
 app.include_router(investment_opinion.router)
 app.include_router(naver_research.router)
+app.include_router(valuation.router)
 
 logger.info("All routers registered successfully")
 

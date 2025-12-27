@@ -326,6 +326,12 @@ class StockPriceService:
         # 데이터 저장
         saved_count = self.save_prices(db, ticker, prices)
 
+        # ✅ 주가 저장 후 밸류에이션 갱신
+        if saved_count > 0:
+            from app.services.valuation_service import get_valuation_service
+            valuation_service = get_valuation_service()
+            valuation_service.update_valuation_for_ticker(db, ticker)
+
         return {
             "ticker": ticker,
             "status": "success",
