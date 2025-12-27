@@ -45,8 +45,6 @@ class NaverResearchService:
         )
 
         saved_count = 0
-        total_ticker_relations = 0
-        total_industry_relations = 0
         downloaded_count = 0
 
         for category, reports in results.items():
@@ -56,12 +54,6 @@ class NaverResearchService:
                 if report:
                     saved_count += 1
 
-                    ticker_count = len(report_data.get("related_tickers", []))
-                    industry_count = len(report_data.get("related_industries", []))
-
-                    total_ticker_relations += ticker_count
-                    total_industry_relations += industry_count
-
                     if auto_download:
                         success = await self.download_pdf(db, report.id)
                         if success:
@@ -69,11 +61,7 @@ class NaverResearchService:
 
         db.commit()
 
-        logger.info(
-            f"Collection complete: {saved_count} reports, "
-            f"{total_ticker_relations} ticker relations, "
-            f"{total_industry_relations} industry relations"
-        )
+        logger.info(f"Collection complete: {saved_count} reports")
 
         return {
             "status": "success",
@@ -82,9 +70,8 @@ class NaverResearchService:
             "total_collected": sum(len(r) for r in results.values()),
             "saved": saved_count,
             "downloaded": downloaded_count,
-            "ticker_relations": total_ticker_relations,
-            "industry_relations": total_industry_relations,
-            "by_category": {cat: len(reports) for cat, reports in results.items()}
+            "by_category": {cat: len(reports) for cat, reports in results.items()},
+            "note": "종목 정보는 Stormlands에서 Ollama로 분석 예정"
         }
 
     async def collect_by_category(
@@ -183,72 +170,30 @@ class NaverResearchService:
         db: Session,
         report_data: Dict[str, Any]
     ) -> Optional[ResearchReport]:
-        """리포트 및 관련 정보 저장 (다대다 관계)"""
+        """
+        리포트 메타데이터만 저장
+
+        NOTE: 종목 관계(report_stock_relations)는 Stormlands에서
+              Ollama로 PDF 분석 후 별도로 저장함
+        """
         try:
             report_id = report_data["id"]
 
-            # 1. 리포트 기본 정보
+            # 리포트 기본 정보만 저장
             existing_report = db.query(ResearchReport).filter(
                 ResearchReport.id == report_id
             ).first()
 
             if existing_report:
+                # 업데이트
                 for key, value in report_data.items():
-                    if key not in ["related_tickers", "related_industries"]:
-                        if hasattr(existing_report, key) and value is not None:
-                            setattr(existing_report, key, value)
+                    if hasattr(existing_report, key) and value is not None:
+                        setattr(existing_report, key, value)
                 report = existing_report
             else:
-                report_dict = {
-                    k: v for k, v in report_data.items()
-                    if k not in ["related_tickers", "related_industries"]
-                }
-                report = ResearchReport(**report_dict)
+                # 신규 삽입
+                report = ResearchReport(**report_data)
                 db.add(report)
-
-            # 2. 종목 관계 저장
-            related_tickers = report_data.get("related_tickers", [])
-
-            if related_tickers:
-                # 기존 관계 삭제
-                db.query(ReportStockRelation).filter(
-                    ReportStockRelation.report_id == report_id
-                ).delete()
-
-                # 새로운 관계 삽입
-                from app.models.stock import Stock
-                for ticker_info in related_tickers:
-                    stock_exists = db.query(Stock).filter(
-                        Stock.ticker == ticker_info["ticker"]
-                    ).first()
-
-                    if not stock_exists:
-                        logger.warning(f"Stock {ticker_info['ticker']} not found, skipping")
-                        continue
-
-                    relation = ReportStockRelation(
-                        report_id=report_id,
-                        ticker=ticker_info["ticker"],
-                        investment_opinion=ticker_info.get("investment_opinion"),
-                        target_price=ticker_info.get("target_price"),
-                        is_main_ticker=ticker_info.get("is_main_ticker", False)
-                    )
-                    db.add(relation)
-
-            # 3. 산업 관계 저장
-            related_industries = report_data.get("related_industries", [])
-
-            if related_industries:
-                db.query(ReportIndustry).filter(
-                    ReportIndustry.report_id == report_id
-                ).delete()
-
-                for industry_name in related_industries:
-                    industry = ReportIndustry(
-                        report_id=report_id,
-                        industry_name=industry_name
-                    )
-                    db.add(industry)
 
             db.flush()
             return report

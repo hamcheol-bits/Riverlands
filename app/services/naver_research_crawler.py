@@ -1,11 +1,15 @@
 """
-네이버증권 리서치 크롤러 (다중 종목 추출 지원)
+네이버증권 리서치 크롤러 (메타데이터 수집 전용)
 app/services/naver_research_crawler.py
+
+역할: 리포트 메타데이터만 수집
+- 제목, 증권사, 날짜, PDF URL
+- 종목/투자의견 분석은 Stormlands에서 Ollama로 처리
 """
 import logging
 import re
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime
 from playwright.async_api import async_playwright, Page
 import asyncio
 
@@ -14,13 +18,7 @@ logger = logging.getLogger(__name__)
 
 class NaverResearchCrawler:
     """
-    네이버증권 리서치 크롤러
-
-    개선 사항:
-    - 다중 종목 추출
-    - 주요 종목 식별
-    - 종목별 투자의견/목표주가 추출
-    - 산업 분류
+    네이버증권 리서치 크롤러 (메타데이터 전용)
     """
 
     # 리서치 카테고리별 URL
@@ -139,7 +137,11 @@ class NaverResearchCrawler:
                         pdf_url = pdf_link
 
                     # 제목 링크 찾기
-                    title_link = await row.query_selector("a[href*='company_read'], a[href*='market_read'], a[href*='invest_read'], a[href*='industry_read'], a[href*='economy_read'], a[href*='debenture_read']")
+                    title_link = await row.query_selector(
+                        "a[href*='company_read'], a[href*='market_read'], "
+                        "a[href*='invest_read'], a[href*='industry_read'], "
+                        "a[href*='economy_read'], a[href*='debenture_read']"
+                    )
                     if not title_link:
                         continue
 
@@ -151,7 +153,7 @@ class NaverResearchCrawler:
                     if len(cells) < 4:
                         continue
 
-                    # 증권사 찾기 (td 중에서 "증권" 포함된 텍스트)
+                    # 증권사 찾기
                     broker = None
                     for cell in cells:
                         text = await cell.inner_text()
@@ -161,10 +163,9 @@ class NaverResearchCrawler:
                             break
 
                     if not broker:
-                        # 증권사가 없으면 건너뛰기
                         continue
 
-                    # 날짜 찾기 (td.date 클래스)
+                    # 날짜 찾기
                     date_cell = await row.query_selector("td.date")
                     if not date_cell:
                         continue
@@ -182,20 +183,13 @@ class NaverResearchCrawler:
                     if end_date and published_date > end_date:
                         continue
 
-                    # ========== 다중 종목 추출 ==========
-                    ticker_details = self._extract_tickers_with_details(title, category)
-
-                    # ========== 산업명 추출 ==========
-                    industries = self._extract_industries(title, category)
-
-                    # ========== 애널리스트명 ==========
+                    # 애널리스트명 추출
                     author = self._extract_author(title)
 
                     # 리포트 ID 생성
-                    report_id = self._generate_report_id(
-                        broker, published_date, category
-                    )
+                    report_id = self._generate_report_id(broker, published_date, category)
 
+                    # NOTE: 종목 정보는 Stormlands에서 Ollama로 PDF 분석하여 추출
                     report = {
                         "id": report_id,
                         "broker": broker,
@@ -207,12 +201,6 @@ class NaverResearchCrawler:
                         "published_date": published_date.strftime("%Y-%m-%d"),
                         "pdf_url": pdf_url,
                         "summary": None,
-
-                        # 다중 종목 정보
-                        "related_tickers": ticker_details,
-
-                        # 산업 정보
-                        "related_industries": industries,
                     }
 
                     reports.append(report)
@@ -256,7 +244,7 @@ class NaverResearchCrawler:
         return results
 
     async def download_pdf(self, pdf_url: str, save_path: str) -> bool:
-        """PDF 다운로드"""
+        """PDF 다운로드 (선택적 기능)"""
         import httpx
 
         try:
@@ -276,177 +264,6 @@ class NaverResearchCrawler:
     # ============================================================
     # 헬퍼 메서드
     # ============================================================
-
-    def _extract_tickers_with_details(
-        self, title: str, category: str
-    ) -> List[Dict[str, Any]]:
-        """제목에서 모든 종목 추출 (상세 정보 포함)"""
-        tickers = []
-        found_tickers = set()
-
-        # (종목명(XXXXXX)) 패턴
-        pattern = r'([^\(]+)\((\d{6})\)'
-        matches = re.finditer(pattern, title)
-
-        for i, match in enumerate(matches):
-            stock_name = match.group(1).strip()
-            ticker = match.group(2)
-
-            if ticker in found_tickers:
-                continue
-            found_tickers.add(ticker)
-
-            is_main = (i == 0 and category == "company")
-
-            opinion = self._extract_opinion_for_ticker(title, stock_name, ticker)
-            target = self._extract_target_price_for_ticker(title, stock_name, ticker)
-
-            tickers.append({
-                "ticker": ticker,
-                "stock_name": stock_name,
-                "is_main_ticker": is_main,
-                "investment_opinion": opinion,
-                "target_price": target
-            })
-
-        # (XXXXXX) 패턴만
-        if not tickers:
-            pattern2 = r'\((\d{6})\)'
-            matches2 = re.findall(pattern2, title)
-
-            for i, ticker in enumerate(matches2):
-                if ticker in found_tickers:
-                    continue
-                found_tickers.add(ticker)
-
-                tickers.append({
-                    "ticker": ticker,
-                    "stock_name": None,
-                    "is_main_ticker": (i == 0 and category == "company"),
-                    "investment_opinion": self._extract_investment_opinion(title),
-                    "target_price": self._extract_target_price(title)
-                })
-
-        # 6자리 숫자만
-        if not tickers:
-            pattern3 = r'\b(\d{6})\b'
-            matches3 = re.findall(pattern3, title)
-
-            for i, ticker in enumerate(matches3):
-                if ticker in found_tickers:
-                    continue
-                found_tickers.add(ticker)
-
-                tickers.append({
-                    "ticker": ticker,
-                    "stock_name": None,
-                    "is_main_ticker": (i == 0 and category == "company"),
-                    "investment_opinion": None,
-                    "target_price": None
-                })
-
-        return tickers
-
-    def _extract_opinion_for_ticker(
-        self, title: str, stock_name: str, ticker: str
-    ) -> Optional[str]:
-        """특정 종목의 투자의견 추출"""
-        opinions = ["BUY", "SELL", "HOLD", "매수", "매도", "중립",
-                   "비중확대", "비중축소", "Outperform", "Underperform"]
-
-        if stock_name:
-            idx = title.find(stock_name)
-            if idx != -1:
-                context = title[idx:idx+50]
-                for opinion in opinions:
-                    if opinion in context.upper():
-                        return opinion
-
-        idx = title.find(ticker)
-        if idx != -1:
-            context = title[idx:idx+50]
-            for opinion in opinions:
-                if opinion in context.upper():
-                    return opinion
-
-        return None
-
-    def _extract_target_price_for_ticker(
-        self, title: str, stock_name: str, ticker: str
-    ) -> Optional[int]:
-        """특정 종목의 목표주가 추출"""
-        if stock_name:
-            idx = title.find(stock_name)
-            if idx != -1:
-                context = title[idx:idx+100]
-                price = self._extract_price_from_text(context)
-                if price:
-                    return price
-
-        idx = title.find(ticker)
-        if idx != -1:
-            context = title[idx:idx+100]
-            price = self._extract_price_from_text(context)
-            if price:
-                return price
-
-        return None
-
-    def _extract_price_from_text(self, text: str) -> Optional[int]:
-        """텍스트에서 가격 추출"""
-        match = re.search(r'목표주?가\s*([0-9,]+)원?', text)
-        if match:
-            try:
-                return int(match.group(1).replace(",", ""))
-            except ValueError:
-                pass
-
-        match = re.search(r'TP\s*([0-9,]+)K?', text, re.IGNORECASE)
-        if match:
-            try:
-                price = int(match.group(1).replace(",", ""))
-                if "K" in text.upper():
-                    price *= 1000
-                return price
-            except ValueError:
-                pass
-
-        return None
-
-    def _extract_industries(self, title: str, category: str) -> List[str]:
-        """제목에서 산업명 추출"""
-        if category != "industry":
-            return []
-
-        industries = []
-        industry_keywords = {
-            "반도체": ["반도체", "메모리", "파운드리"],
-            "2차전지": ["2차전지", "배터리", "전지"],
-            "자동차": ["자동차", "전기차", "EV"],
-            "조선": ["조선", "해운"],
-            "철강": ["철강", "제철"],
-            "화학": ["화학", "석유화학"],
-            "바이오": ["바이오", "제약"],
-            "금융": ["금융", "은행", "증권"],
-        }
-
-        for industry, keywords in industry_keywords.items():
-            if any(kw in title for kw in keywords):
-                industries.append(industry)
-
-        return industries
-
-    def _extract_investment_opinion(self, title: str) -> Optional[str]:
-        """제목에서 투자의견 추출"""
-        opinions = ["BUY", "SELL", "HOLD", "매수", "매도", "중립"]
-        for opinion in opinions:
-            if opinion in title.upper():
-                return opinion
-        return None
-
-    def _extract_target_price(self, title: str) -> Optional[int]:
-        """제목에서 목표주가 추출"""
-        return self._extract_price_from_text(title)
 
     def _extract_author(self, title: str) -> Optional[str]:
         """제목에서 애널리스트명 추출"""
@@ -473,9 +290,7 @@ class NaverResearchCrawler:
             logger.warning(f"Failed to parse date: {date_str} - {e}")
             return None
 
-    def _generate_report_id(
-        self, broker: str, date: datetime, category: str
-    ) -> str:
+    def _generate_report_id(self, broker: str, date: datetime, category: str) -> str:
         """리포트 ID 생성"""
         import hashlib
 

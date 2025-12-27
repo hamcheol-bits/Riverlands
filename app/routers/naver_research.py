@@ -1,6 +1,8 @@
 """
-네이버증권 리서치 API Router
+네이버증권 리서치 API Router (메타데이터 전용)
 app/routers/naver_research.py
+
+NOTE: 종목 관련 엔드포인트는 Stormlands로 이동
 """
 from fastapi import APIRouter, Depends, Query, BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
@@ -93,38 +95,6 @@ async def collect_by_category(
     return result
 
 
-@router.post("/collect/ticker/{ticker}")
-async def collect_by_ticker(
-    ticker: str,
-    background_tasks: BackgroundTasks,
-    days: int = Query(30, ge=1, le=365, description="수집 기간 (일)"),
-    auto_download: bool = Query(False, description="자동 PDF 다운로드"),
-    run_background: bool = Query(False, description="백그라운드 실행"),
-    db: Session = Depends(get_db)
-):
-    """
-    특정 종목 리포트 수집
-
-    Examples:
-        - POST /api/naver-research/collect/ticker/005930?days=30
-        - POST /api/naver-research/collect/ticker/035720?auto_download=true
-    """
-    service = get_naver_research_service()
-
-    if run_background:
-        background_tasks.add_task(
-            service.collect_by_ticker, db, ticker, days, auto_download
-        )
-        return {
-            "status": "background_task_started",
-            "ticker": ticker,
-            "message": f"Collection started for {ticker}"
-        }
-
-    result = await service.collect_by_ticker(db, ticker, days, auto_download)
-    return result
-
-
 # ============================================================
 # PDF 다운로드 엔드포인트
 # ============================================================
@@ -135,10 +105,10 @@ async def download_pdf(
     db: Session = Depends(get_db)
 ):
     """
-    특정 리포트 PDF 다운로드
+    단일 리포트 PDF 다운로드
 
     Examples:
-        - POST /api/naver-research/download/naver_미래에셋_20241220_company_abc123
+        - POST /api/naver-research/download/naver_미래에셋_20241226_company_abc123
     """
     service = get_naver_research_service()
     success = await service.download_pdf(db, report_id)
@@ -193,83 +163,59 @@ async def get_recent_reports(
     days: int = Query(7, ge=1, le=90, description="조회 기간 (일)"),
     limit: int = Query(100, ge=1, le=500, description="결과 개수"),
     category: Optional[str] = Query(None, description="카테고리"),
+    broker: Optional[str] = Query(None, description="증권사"),
     db: Session = Depends(get_db)
 ):
     """
-    최근 리포트 조회
+    최근 리포트 조회 (메타데이터만)
 
     Examples:
         - GET /api/naver-research/reports/recent?days=7
         - GET /api/naver-research/reports/recent?days=30&category=company
+        - GET /api/naver-research/reports/recent?broker=미래에셋증권
     """
     service = get_naver_research_service()
-    reports = service.get_recent_reports(db, days, limit, category)
+    reports = service.get_recent_reports(db, days, limit, category, broker)
 
     return {
         "days": days,
         "category": category,
+        "broker": broker,
         "total": len(reports),
-        "items": [report.to_dict(include_relations=True) for report in reports]
+        "items": [report.to_dict() for report in reports]
     }
 
 
-@router.get("/reports/ticker/{ticker}")
-async def get_reports_by_ticker(
-    ticker: str,
-    days: int = Query(30, ge=1, le=365, description="조회 기간 (일)"),
-    include_non_main: bool = Query(True, description="주요 종목 아닌 리포트도 포함"),
+@router.get("/reports/{report_id}")
+async def get_report_detail(
+    report_id: str,
     db: Session = Depends(get_db)
 ):
     """
-    종목별 리포트 조회
+    리포트 상세 조회
 
     Examples:
-        - GET /api/naver-research/reports/ticker/005930?days=30
-        - GET /api/naver-research/reports/ticker/005930?include_non_main=false
+        - GET /api/naver-research/reports/naver_미래에셋_20241226_company_abc123
     """
     service = get_naver_research_service()
-    reports = service.get_reports_by_ticker(db, ticker, days, include_non_main)
+    report = service.get_report_by_id(db, report_id)
 
-    return {
-        "ticker": ticker,
-        "days": days,
-        "include_non_main": include_non_main,
-        "total": len(reports),
-        "items": [report.to_dict(include_relations=True) for report in reports]
-    }
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    return report.to_dict()
 
 
-@router.get("/reports/ticker/{ticker}/consensus")
-async def get_ticker_consensus(
-    ticker: str,
-    days: int = Query(30, ge=1, le=365, description="조회 기간 (일)"),
-    db: Session = Depends(get_db)
-):
-    """
-    종목별 컨센서스 (여러 증권사 의견 집계)
-
-    Examples:
-        - GET /api/naver-research/reports/ticker/005930/consensus?days=30
-
-    Returns:
-        {
-            "ticker": "005930",
-            "report_count": 15,
-            "opinions": {"BUY": 10, "HOLD": 3, "SELL": 2},
-            "avg_target_price": 82000,
-            "target_price_range": {"min": 75000, "max": 90000}
-        }
-    """
-    service = get_naver_research_service()
-    consensus = service.get_ticker_consensus(db, ticker, days)
-
-    return consensus
-
+# ============================================================
+# 통계 엔드포인트
+# ============================================================
 
 @router.get("/stats")
-async def get_stats(db: Session = Depends(get_db)):
+async def get_stats(
+    db: Session = Depends(get_db)
+):
     """
-    수집 통계
+    리포트 수집 통계
 
     Examples:
         - GET /api/naver-research/stats
@@ -280,20 +226,82 @@ async def get_stats(db: Session = Depends(get_db)):
     return stats
 
 
-@router.get("/health")
-async def health_check():
+@router.get("/stats/by-broker")
+async def get_stats_by_broker(
+    days: int = Query(30, ge=1, le=365, description="조회 기간 (일)"),
+    db: Session = Depends(get_db)
+):
     """
-    헬스체크
+    증권사별 통계
+
+    Examples:
+        - GET /api/naver-research/stats/by-broker?days=30
+    """
+    service = get_naver_research_service()
+    stats = service.get_stats_by_broker(db, days)
+
+    return {
+        "days": days,
+        "brokers": stats
+    }
+
+
+@router.get("/stats/by-category")
+async def get_stats_by_category(
+    days: int = Query(30, ge=1, le=365, description="조회 기간 (일)"),
+    db: Session = Depends(get_db)
+):
+    """
+    카테고리별 통계
+
+    Examples:
+        - GET /api/naver-research/stats/by-category?days=30
+    """
+    service = get_naver_research_service()
+    stats = service.get_stats_by_category(db, days)
+
+    return {
+        "days": days,
+        "categories": stats
+    }
+
+
+# ============================================================
+# 헬스체크
+# ============================================================
+
+@router.get("/health")
+async def health_check(db: Session = Depends(get_db)):
+    """
+    서비스 헬스체크
 
     Examples:
         - GET /api/naver-research/health
     """
-    from app.services.naver_research_crawler import NaverResearchCrawler
+    from app.models.research_report import ResearchReport
 
-    crawler = NaverResearchCrawler()
+    try:
+        # DB 연결 확인
+        total_reports = db.query(ResearchReport).count()
 
-    return {
-        "status": "healthy",
-        "categories": list(crawler.RESEARCH_URLS.keys()),
-        "category_count": len(crawler.RESEARCH_URLS)
-    }
+        # 최근 리포트 확인
+        latest_report = db.query(ResearchReport).order_by(
+            ResearchReport.published_date.desc()
+        ).first()
+
+        return {
+            "status": "healthy",
+            "total_reports": total_reports,
+            "latest_report_date": latest_report.published_date.isoformat() if latest_report else None,
+            "note": "종목 정보는 Stormlands에서 Ollama로 분석"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
+
+
+# ============================================================
+# 종목 관련 엔드포인트는 제거됨
+# - /reports/ticker/{ticker} → Stormlands로 이동
+# - /reports/ticker/{ticker}/consensus → Stormlands로 이동
+# - /collect/ticker/{ticker} → 의미 없음 (종목 정보 없음)
+# ============================================================
