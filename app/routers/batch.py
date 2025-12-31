@@ -113,17 +113,19 @@ async def batch_collect_prices(
 
 
 # ============================================================
-# 시장별 재무제표 배치
+# Batch API Router - 재무제표 수집 부분 개선
+# 시장별 분기 데이터를 연도 단위로 수집
 # ============================================================
 
 @router.post("/financials/{market}")
 async def batch_collect_financials(
-    market: str,
-    background_tasks: BackgroundTasks,
-    period_type: str = Query("0", description="0(연간), 1(분기)"),
-    limit: Optional[int] = Query(None, description="처리 종목 수 제한"),
-    run_background: bool = Query(False, description="백그라운드 실행 여부"),
-    db: Session = Depends(get_db)
+        market: str,
+        background_tasks: BackgroundTasks,
+        period_type: str = Query("0", description="0(연간), 1(분기)"),
+        year: Optional[int] = Query(None, ge=2000, le=2030, description="분기 수집시 연도 (예: 2024)"),
+        limit: Optional[int] = Query(None, description="처리 종목 수 제한"),
+        run_background: bool = Query(False, description="백그라운드 실행 여부"),
+        db: Session = Depends(get_db)
 ):
     """
     시장별 재무제표 배치 수집
@@ -131,13 +133,29 @@ async def batch_collect_financials(
     Args:
         market: KOSPI, KOSDAQ, ALL
         period_type: 0(연간), 1(분기)
+        year: 분기 수집시 연도 (예: 2024)
+              - 미지정시 현재 연도
+              - 현재 연도면 현재 분기까지만
+              - 과거 연도면 Q1~Q4 모두
+              - 연간 데이터는 무시됨
         limit: 처리 종목 수 제한
         run_background: 백그라운드 실행 여부
 
     Examples:
-        - POST /api/batch/financials/KOSPI
-        - POST /api/batch/financials/KOSDAQ?period_type=1
-        - POST /api/batch/financials/ALL?run_background=true
+        - POST /api/batch/financials/KOSPI?period_type=0
+          → KOSPI 연간 데이터 수집
+
+        - POST /api/batch/financials/KOSPI?period_type=1
+          → KOSPI 현재 연도 분기 데이터 수집
+
+        - POST /api/batch/financials/KOSPI?period_type=1&year=2024
+          → KOSPI 2024년 분기 데이터 수집 (Q1~Q4)
+
+        - POST /api/batch/financials/KOSDAQ?period_type=1&year=2024&limit=10
+          → KOSDAQ 10종목만 2024년 분기 수집
+
+        - POST /api/batch/financials/ALL?period_type=1&year=2025&run_background=true
+          → 전체 시장 2025년 분기 백그라운드 수집
 
     Returns:
         배치 수집 결과
@@ -155,36 +173,39 @@ async def batch_collect_financials(
     if run_background:
         background_tasks.add_task(
             service.batch_collect_financials,
-            db, market, period_type, limit
+            db, market, period_type, year, limit
         )
         period_char = "Y" if period_type == "0" else "Q"
+
+        msg_parts = [f"Financial batch collection started for {market} ({period_char})"]
+        if period_type == "1" and year:
+            msg_parts.append(f"year {year}")
+
         return {
             "status": "background_task_started",
             "market": market,
             "period_type": period_char,
-            "message": f"Financial batch collection started in background for {market}"
+            "year": year if period_type == "1" else None,
+            "message": " ".join(msg_parts)
         }
 
     # 동기 실행
-    result = await service.batch_collect_financials(db, market, period_type, limit)
+    result = await service.batch_collect_financials(db, market, period_type, year, limit)
     return result
 
 
-# ============================================================
-# 통합 배치 (종목 + 주가 + 재무제표)
-# ============================================================
-
 @router.post("/all/{market}")
 async def batch_collect_all(
-    market: str,
-    background_tasks: BackgroundTasks,
-    include_stocks: bool = Query(True, description="종목 정보 수집"),
-    include_prices: bool = Query(True, description="주가 수집"),
-    include_financials: bool = Query(True, description="재무제표 수집"),
-    price_mode: str = Query("incremental", description="주가 수집 모드"),
-    limit: Optional[int] = Query(None, description="처리 종목 수 제한"),
-    run_background: bool = Query(False, description="백그라운드 실행 여부"),
-    db: Session = Depends(get_db)
+        market: str,
+        background_tasks: BackgroundTasks,
+        include_stocks: bool = Query(True, description="종목 정보 수집"),
+        include_prices: bool = Query(True, description="주가 수집"),
+        include_financials: bool = Query(True, description="재무제표 수집"),
+        price_mode: str = Query("incremental", description="주가 수집 모드"),
+        financial_year: Optional[int] = Query(None, ge=2000, le=2030, description="분기 재무제표 수집시 연도"),
+        limit: Optional[int] = Query(None, description="처리 종목 수 제한"),
+        run_background: bool = Query(False, description="백그라운드 실행 여부"),
+        db: Session = Depends(get_db)
 ):
     """
     시장별 전체 데이터 통합 수집
@@ -197,13 +218,22 @@ async def batch_collect_all(
         include_prices: 주가 수집 여부
         include_financials: 재무제표 수집 여부
         price_mode: incremental 또는 full
+        financial_year: 분기 재무제표 수집시 연도 (미지정시 현재 연도)
         limit: 처리 종목 수 제한
         run_background: 백그라운드 실행 여부
 
     Examples:
         - POST /api/batch/all/KOSPI
+          → KOSPI 전체 (연간 + 현재 연도 분기)
+
+        - POST /api/batch/all/KOSPI?financial_year=2024
+          → KOSPI 전체 (연간 + 2024년 분기)
+
         - POST /api/batch/all/ALL?run_background=true
-        - POST /api/batch/all/KOSDAQ?limit=10
+          → 전체 시장 백그라운드 수집
+
+        - POST /api/batch/all/KOSDAQ?limit=10&financial_year=2024
+          → KOSDAQ 10종목만 (연간 + 2024년 분기)
 
     Returns:
         통합 수집 결과
@@ -222,18 +252,24 @@ async def batch_collect_all(
         background_tasks.add_task(
             service.batch_collect_all,
             db, market, include_stocks, include_prices,
-            include_financials, price_mode, limit
+            include_financials, price_mode, financial_year, limit
         )
+
+        msg_parts = [f"Full batch collection started for {market}"]
+        if financial_year:
+            msg_parts.append(f"(quarterly: {financial_year})")
+
         return {
             "status": "background_task_started",
             "market": market,
-            "message": f"Full batch collection started in background for {market}"
+            "financial_year": financial_year,
+            "message": " ".join(msg_parts)
         }
 
     # 동기 실행
     result = await service.batch_collect_all(
         db, market, include_stocks, include_prices,
-        include_financials, price_mode, limit
+        include_financials, price_mode, financial_year, limit
     )
     return result
 

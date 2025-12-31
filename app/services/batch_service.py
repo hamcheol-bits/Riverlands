@@ -179,11 +179,12 @@ class BatchService:
     # ============================================================
 
     async def batch_collect_financials(
-        self,
-        db: Session,
-        market: str = "ALL",
-        period_type: str = "0",
-        limit: Optional[int] = None
+            self,
+            db: Session,
+            market: str = "ALL",
+            period_type: str = "0",
+            year: Optional[int] = None,
+            limit: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         시장별 재무제표 배치 수집
@@ -192,6 +193,9 @@ class BatchService:
             db: 데이터베이스 세션
             market: KOSPI, KOSDAQ, ALL
             period_type: 0(연간), 1(분기)
+            year: 분기 수집시 연도 (예: 2024)
+                  - 미지정시 현재 연도
+                  - 연간 데이터는 무시됨
             limit: 처리 종목 수 제한
 
         Returns:
@@ -199,7 +203,11 @@ class BatchService:
         """
         market = market.upper()
         period_char = "Y" if period_type == "0" else "Q"
-        logger.info(f"Starting batch financial collection for {market}, period: {period_char}")
+
+        log_msg = f"Starting batch financial collection for {market}, period: {period_char}"
+        if period_type == "1" and year:
+            log_msg += f", year: {year}"
+        logger.info(log_msg)
 
         # 종목 리스트 조회
         query = db.query(Stock).filter(Stock.is_active == True)
@@ -225,8 +233,9 @@ class BatchService:
             logger.info(f"Processing {idx}/{total_stocks}: {stock.ticker} ({stock.hts_kor_isnm})")
 
             try:
+                # period_type과 year 모두 전달
                 result = await self.financial_service.collect_and_save(
-                    db, stock.ticker, period_type
+                    db, stock.ticker, period_type, year
                 )
 
                 if result["status"] == "success":
@@ -248,7 +257,7 @@ class BatchService:
             f"saved: {total_saved}"
         )
 
-        return {
+        batch_result = {
             "market": market,
             "period_type": period_char,
             "total_stocks": total_stocks,
@@ -257,19 +266,22 @@ class BatchService:
             "results": results
         }
 
-    # ============================================================
-    # 통합 배치 (종목 + 주가 + 재무제표)
-    # ============================================================
+        if period_type == "1" and year:
+            batch_result["year"] = year
 
+        return batch_result
+
+    # batch_collect_all 메서드도 수정 필요
     async def batch_collect_all(
-        self,
-        db: Session,
-        market: str = "ALL",
-        include_stocks: bool = True,
-        include_prices: bool = True,
-        include_financials: bool = True,
-        price_mode: str = "incremental",
-        limit: Optional[int] = None
+            self,
+            db: Session,
+            market: str = "ALL",
+            include_stocks: bool = True,
+            include_prices: bool = True,
+            include_financials: bool = True,
+            price_mode: str = "incremental",
+            financial_year: Optional[int] = None,
+            limit: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         시장별 전체 데이터 통합 수집
@@ -281,6 +293,7 @@ class BatchService:
             include_prices: 주가 수집 여부
             include_financials: 재무제표 수집 여부
             price_mode: 주가 수집 모드 (incremental/full)
+            financial_year: 분기 재무제표 수집시 연도 (미지정시 현재 연도)
             limit: 처리 종목 수 제한
 
         Returns:
@@ -327,18 +340,18 @@ class BatchService:
             logger.info("Step 3: Collecting annual financials...")
             try:
                 annual_result = await self.batch_collect_financials(
-                    db, market, period_type="0", limit=limit
+                    db, market, period_type="0", year=None, limit=limit
                 )
                 result["annual_result"] = annual_result
             except Exception as e:
                 logger.error(f"Failed to collect annual financials: {e}")
                 result["annual_result"] = {"status": "error", "message": str(e)}
 
-            # 4. 분기 재무제표 수집
-            logger.info("Step 4: Collecting quarterly financials...")
+            # 4. 분기 재무제표 수집 (연도 단위)
+            logger.info(f"Step 4: Collecting quarterly financials (year={financial_year or 'current'})...")
             try:
                 quarterly_result = await self.batch_collect_financials(
-                    db, market, period_type="1", limit=limit
+                    db, market, period_type="1", year=financial_year, limit=limit
                 )
                 result["quarterly_result"] = quarterly_result
             except Exception as e:

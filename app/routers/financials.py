@@ -1,6 +1,10 @@
 """
-Financial API Router
+Financial API Router (개선 버전)
 재무제표 데이터 조회, 수집
+
+주요 변경사항:
+- 분기 데이터 수집시 year 파라미터 추가
+- 연도 단위로 분기 실적 수집
 """
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
@@ -18,21 +22,7 @@ async def get_latest_financial(
     period_type: str = Query("Y", description="Y(연간), Q(분기)"),
     db: Session = Depends(get_db)
 ):
-    """
-    최신 재무제표 조회
-
-    Args:
-        ticker: 종목코드
-        period_type: Y(연간), Q(분기)
-
-    Examples:
-        - GET /api/financials/005930/latest
-        - GET /api/financials/005930/latest?period_type=Y
-        - GET /api/financials/005930/latest?period_type=Q
-
-    Returns:
-        최신 재무제표
-    """
+    """최신 재무제표 조회"""
     period_type = period_type.upper()
     if period_type not in ["Y", "Q"]:
         raise HTTPException(status_code=400, detail="period_type must be Y or Q")
@@ -56,21 +46,7 @@ async def get_financial_by_period(
     period_type: str = Query("Y", description="Y(연간), Q(분기)"),
     db: Session = Depends(get_db)
 ):
-    """
-    특정 기간 재무제표 조회
-
-    Args:
-        ticker: 종목코드
-        stac_yymm: 결산년월 (YYYYMM)
-        period_type: Y(연간), Q(분기)
-
-    Examples:
-        - GET /api/financials/005930/period/202412
-        - GET /api/financials/005930/period/202409?period_type=Q
-
-    Returns:
-        해당 기간 재무제표
-    """
+    """특정 기간 재무제표 조회"""
     period_type = period_type.upper()
     if period_type not in ["Y", "Q"]:
         raise HTTPException(status_code=400, detail="period_type must be Y or Q")
@@ -94,22 +70,7 @@ async def get_financials(
     limit: int = Query(10, ge=1, le=100, description="조회 개수"),
     db: Session = Depends(get_db)
 ):
-    """
-    재무제표 목록 조회
-
-    Args:
-        ticker: 종목코드
-        period_type: Y(연간), Q(분기), None(전체)
-        limit: 조회 개수
-
-    Examples:
-        - GET /api/financials/005930/list
-        - GET /api/financials/005930/list?period_type=Y&limit=5
-        - GET /api/financials/005930/list?period_type=Q&limit=12
-
-    Returns:
-        재무제표 목록
-    """
+    """재무제표 목록 조회"""
     if period_type and period_type.upper() not in ["Y", "Q"]:
         raise HTTPException(status_code=400, detail="period_type must be Y or Q")
 
@@ -128,6 +89,7 @@ async def get_financials(
 async def collect_financials(
     ticker: str,
     period_type: str = Query("0", description="0(연간), 1(분기)"),
+    year: Optional[int] = Query(None, ge=2000, le=2030, description="분기 수집시 연도 (예: 2024, 2025)"),
     db: Session = Depends(get_db)
 ):
     """
@@ -136,11 +98,23 @@ async def collect_financials(
     Args:
         ticker: 종목코드
         period_type: 0(연간), 1(분기)
+        year: 분기 데이터 수집시 연도 (예: 2024)
+              - 미지정시 현재 연도
+              - 현재 연도면 현재 분기까지만 수집
+              - 과거 연도면 Q1~Q4 모두 수집
 
     Examples:
-        - POST /api/financials/005930/collect
         - POST /api/financials/005930/collect?period_type=0
+          → 연간 데이터 수집
+
         - POST /api/financials/005930/collect?period_type=1
+          → 현재 연도 분기 데이터 수집 (예: 2025 Q1~Q3)
+
+        - POST /api/financials/005930/collect?period_type=1&year=2024
+          → 2024년 분기 데이터 수집 (Q1~Q4)
+
+        - POST /api/financials/005930/collect?period_type=1&year=2025
+          → 2025년 분기 데이터 수집 (현재 분기까지)
 
     Returns:
         수집 결과
@@ -149,7 +123,7 @@ async def collect_financials(
         raise HTTPException(status_code=400, detail="period_type must be 0 or 1")
 
     service = get_financial_service()
-    result = await service.collect_and_save(db, ticker, period_type)
+    result = await service.collect_and_save(db, ticker, period_type, year)
 
     return result
 
@@ -157,6 +131,7 @@ async def collect_financials(
 @router.post("/{ticker}/collect/all")
 async def collect_all_financials(
     ticker: str,
+    year: Optional[int] = Query(None, ge=2000, le=2030, description="분기 데이터 수집시 연도"),
     db: Session = Depends(get_db)
 ):
     """
@@ -164,9 +139,14 @@ async def collect_all_financials(
 
     Args:
         ticker: 종목코드
+        year: 분기 데이터 수집시 연도 (미지정시 현재 연도)
 
     Examples:
         - POST /api/financials/005930/collect/all
+          → 연간 + 현재 연도 분기
+
+        - POST /api/financials/005930/collect/all?year=2024
+          → 연간 + 2024년 분기
 
     Returns:
         수집 결과
@@ -177,7 +157,7 @@ async def collect_all_financials(
     annual_result = await service.collect_and_save(db, ticker, "0")
 
     # 분기 수집
-    quarterly_result = await service.collect_and_save(db, ticker, "1")
+    quarterly_result = await service.collect_and_save(db, ticker, "1", year)
 
     return {
         "ticker": ticker,
