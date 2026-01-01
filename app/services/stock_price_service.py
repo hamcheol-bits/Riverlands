@@ -330,7 +330,7 @@ class StockPriceService:
         if saved_count > 0:
             from app.services.valuation_service import get_valuation_service
             valuation_service = get_valuation_service()
-            valuation_service.update_valuation_for_ticker(db, ticker)
+            valuation_service.update_valuation_cache(db, ticker)
 
         return {
             "ticker": ticker,
